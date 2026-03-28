@@ -1,13 +1,88 @@
+# ===========================
+# Environment & Secrets
+# ===========================
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+credentials/
+
+# ===========================
+# Python
+# ===========================
 .venv/
+venv/
+env/
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.DS_Store
-.env
-dist/
-build/
-frontend/dist/
+.coverage
+htmlcov/
+.tox/
+.nox/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===========================
+# Node.js / Frontend
+# ===========================
+node_modules/
 frontend/node_modules/
-*.egg-info/
+frontend/dist/
+frontend/.cache/
+.npm
+.yarn/
+*.tsbuildinfo
+
+# ===========================
+# Alembic
+# ===========================
 alembic/versions/*.pyc
+
+# ===========================
+# IDEs & Editors
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ===========================
+# OS Files
+# ===========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===========================
+# Docker
+# ===========================
+docker-compose.override.yml
+
+# ===========================
+# Logs & Temp
+# ===========================
+*.log
+logs/
+tmp/
+temp/

@@ -25,17 +25,20 @@ connector_type_enum = postgresql.ENUM(
     "gdrive",
     "gong",
     name="connector_type_enum",
+    create_type=False,
 )
 connector_status_enum = postgresql.ENUM(
     "connected",
     "disconnected",
     "error",
     name="connector_status_enum",
+    create_type=False,
 )
 knowledge_model_status_enum = postgresql.ENUM(
     "active",
     "archived",
     name="knowledge_model_status_enum",
+    create_type=False,
 )
 relationship_type_enum = postgresql.ENUM(
     "depends_on",
@@ -45,12 +48,14 @@ relationship_type_enum = postgresql.ENUM(
     "supersedes",
     "related_to",
     name="relationship_type_enum",
+    create_type=False,
 )
 relationship_sentiment_enum = postgresql.ENUM(
     "positive",
     "negative",
     "neutral",
     name="relationship_sentiment_enum",
+    create_type=False,
 )
 
 
