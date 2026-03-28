@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.knowledge import (
+    KnowledgeModelStatus,
+    RelationshipSentiment,
+    RelationshipType,
+)
+
+
+class KnowledgeModelCreate(BaseModel):
+    workspace_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    status: KnowledgeModelStatus = KnowledgeModelStatus.ACTIVE
+    auto_generated: bool = False
+
+
+class ComponentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    value: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    authority_source: str | None = Field(default=None, max_length=255)
+    last_verified_at: datetime | None = None
+    is_stale: bool = False
+
+
+class ComponentUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    value: str | None = Field(default=None, min_length=1)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    authority_source: str | None = Field(default=None, max_length=255)
+    last_verified_at: datetime | None = None
+    is_stale: bool | None = None
+
+
+class RelationshipCreate(BaseModel):
+    source_component_id: UUID
+    target_component_id: UUID
+    relationship_type: RelationshipType
+    sentiment: RelationshipSentiment = RelationshipSentiment.NEUTRAL
+    description: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class ComponentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    model_id: UUID
+    name: str
+    value: str
+    confidence: float
+    authority_source: str | None
+    last_verified_at: datetime
+    is_stale: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeModelRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    name: str
+    description: str | None
+    status: KnowledgeModelStatus
+    auto_generated: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeModelDetail(KnowledgeModelRead):
+    components: list[ComponentRead]
+
+
+class RelationshipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    source_component_id: UUID
+    target_component_id: UUID
+    relationship_type: RelationshipType
+    sentiment: RelationshipSentiment
+    description: str | None
+    confidence: float
+    created_at: datetime

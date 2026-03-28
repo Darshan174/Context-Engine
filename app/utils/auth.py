@@ -1,0 +1,2 @@
+"""Authentication utilities placeholder."""
+
