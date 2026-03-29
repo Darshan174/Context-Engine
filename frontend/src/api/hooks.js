@@ -46,6 +46,36 @@ function withFallback(apiFn, mockData, { fallbackStatuses = [] } = {}) {
 }
 
 const LS_KEY = "ce:selectedWorkspaceId";
+const CONNECTOR_CATALOG = {
+  slack: {
+    type: "slack",
+    name: "Slack",
+    description: "Channels, DMs, and thread history",
+    color: "#4A154B",
+    availability: "available",
+  },
+  notion: {
+    type: "notion",
+    name: "Notion",
+    description: "Wikis, docs, and linked databases",
+    color: "#111111",
+    availability: "coming_soon",
+  },
+  gdrive: {
+    type: "gdrive",
+    name: "Google Drive",
+    description: "Docs, Sheets, Slides, and folder content",
+    color: "#0F9D58",
+    availability: "coming_soon",
+  },
+  gong: {
+    type: "gong",
+    name: "Gong",
+    description: "Calls, transcripts, and customer conversations",
+    color: "#7C3AED",
+    availability: "coming_soon",
+  },
+};
 
 /**
  * Resolve the workspace ID to use for API calls.
@@ -167,12 +197,20 @@ export function useConnectors() {
   const query = useQuery({
     queryKey: ["connectors"],
     queryFn: withFallback(
-      () => api.get("/connectors"),
+      async () => {
+        const wsId = await getWorkspaceId();
+        if (!wsId) return [];
+        return api.get(`/connectors?workspace_id=${wsId}`);
+      },
       mockConnectors,
       { fallbackStatuses: [404, 501] },
     ),
   });
-  return { ...query, isMock: query.data === mockConnectors };
+  return {
+    ...query,
+    data: normalizeConnectors(query.data),
+    isMock: query.data === mockConnectors,
+  };
 }
 
 // ── Knowledge Graph ────────────────────────────────────────────
@@ -209,7 +247,11 @@ export function useContextQuery() {
       try {
         const wsId = await getWorkspaceId();
         return await api.post("/query", { question, workspace_id: wsId });
-      } catch {
+      } catch (err) {
+        // Only fall back to mock on network errors (backend unreachable).
+        // Real server errors (4xx/5xx) have a status — let them propagate.
+        if (err.status) throw err;
+
         // Simulate latency then return a mock answer that best matches the question
         await new Promise((r) => setTimeout(r, 800));
         const q = question.toLowerCase();
@@ -289,4 +331,96 @@ export function useCreateRelationship() {
     mutationFn: (body) => api.post("/relationships", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["model-relationships"] }),
   });
+}
+
+export function useSyncConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connectorId) => api.post(`/connectors/${connectorId}/sync`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+export function useDisconnectConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connectorId) => api.delete(`/connectors/${connectorId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+function normalizeConnectors(data) {
+  if (!Array.isArray(data)) return [];
+
+  const isMockShape = data.every((item) => item && "lastSync" in item);
+  if (isMockShape) {
+    return data.map((item) => ({
+      ...item,
+      type: item.id,
+      connectorId: null,
+      availability: item.id === "slack" ? "available" : "coming_soon",
+      isInstalled: item.status === "connected" || item.status === "warning" || item.status === "error",
+      status: item.id === "slack" ? item.status : "coming_soon",
+    }));
+  }
+
+  const recordsByType = new Map(
+    data
+      .filter((item) => item?.connector_type)
+      .map((item) => [item.connector_type, item]),
+  );
+
+  return Object.values(CONNECTOR_CATALOG).map((catalogItem) => {
+    const record = recordsByType.get(catalogItem.type);
+    if (!record) {
+      return {
+        ...catalogItem,
+        id: catalogItem.type,
+        connectorId: null,
+        status:
+          catalogItem.availability === "available" ? "disconnected" : "coming_soon",
+        isInstalled: false,
+        lastSync: "Never",
+        itemsSynced: 0,
+        message:
+          catalogItem.availability === "available"
+            ? "Not connected yet."
+            : "Planned after the Slack reference connector ships.",
+      };
+    }
+
+    return {
+      ...catalogItem,
+      id: record.id,
+      connectorId: record.id,
+      status: record.status,
+      isInstalled: record.status !== "disconnected",
+      lastSync: formatConnectorDate(record.last_sync_at),
+      itemsSynced: extractConnectorCount(record.config),
+      message: record.config?.message ?? null,
+      teamName: record.config?.team_name ?? null,
+      teamId: record.config?.team_id ?? null,
+      scope: record.config?.scope ?? null,
+      syncQueuedAt: formatConnectorDate(record.config?.sync_queued_at, { fallback: null }),
+    };
+  });
+}
+
+function formatConnectorDate(value, { fallback = "Never" } = {}) {
+  if (!value) return fallback;
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function extractConnectorCount(config) {
+  if (!config || typeof config !== "object") return 0;
+  return (
+    config.document_count ??
+    config.items_synced ??
+    config.item_count ??
+    0
+  );
 }

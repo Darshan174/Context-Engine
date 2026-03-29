@@ -194,7 +194,7 @@ export default function ComponentCard({
 
       {/* Action buttons — only for backend components */}
       {canMutate && (
-        <div className="flex gap-2 pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-2 pt-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => {
               setEditName(name);
@@ -203,12 +203,14 @@ export default function ComponentCard({
               setEditAuthority(authority_source ?? "");
               setMode("edit");
             }}
+            aria-label={`Edit ${name}`}
             className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
           >
             Edit
           </button>
           <button
             onClick={() => setMode("confirmDelete")}
+            aria-label={`Delete ${name}`}
             className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
           >
             Delete

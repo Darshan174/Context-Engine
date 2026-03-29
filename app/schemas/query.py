@@ -1,2 +1,63 @@
-"""Query API schemas will live here."""
+from __future__ import annotations
 
+import enum
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class FreshnessStatus(str, enum.Enum):
+    CURRENT = "current"
+    POSSIBLY_STALE = "possibly_stale"
+    STALE = "stale"
+
+
+class QueryFilters(BaseModel):
+    model_names: list[str] | None = None
+    min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_age_days: int | None = Field(default=None, ge=0)
+
+
+class QueryRequest(BaseModel):
+    question: str = Field(min_length=1)
+    workspace_id: UUID
+    model_names: list[str] | None = None
+    min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_age_days: int | None = Field(default=None, ge=0)
+
+    def to_filters(self) -> QueryFilters:
+        return QueryFilters(
+            model_names=self.model_names,
+            min_confidence=self.min_confidence,
+            max_age_days=self.max_age_days,
+        )
+
+
+class QuerySourceRead(BaseModel):
+    type: str
+    author: str | None = None
+    date: str | None = None
+    url: str | None = None
+
+
+class QueryComponentRead(BaseModel):
+    id: UUID
+    model: str
+    name: str
+    value: str
+    confidence: float
+    authority_source: str | None = None
+    last_verified_at: datetime | None = None
+
+
+class QueryResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    question: str
+    answer: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    freshness: FreshnessStatus
+    components: list[QueryComponentRead]
+    sources: list[QuerySourceRead]
+    answered_at: str = Field(serialization_alias="answeredAt")

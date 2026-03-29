@@ -224,7 +224,9 @@ class TestCreateRelationship:
         assert resp.status_code == 201
         body = resp.json()
         assert body["source_component_id"] == c1["id"]
+        assert body["source_component_name"] == c1["name"]
         assert body["target_component_id"] == c2["id"]
+        assert body["target_component_name"] == c2["name"]
         assert body["relationship_type"] == "enables"
         assert body["sentiment"] == "positive"
 
@@ -287,7 +289,10 @@ class TestModelRelationships:
         rels = resp.json()
         assert len(rels) >= 1
         assert any(
-            r["source_component_id"] == c1["id"] and r["target_component_id"] == c2["id"]
+            r["source_component_id"] == c1["id"]
+            and r["source_component_name"] == c1["name"]
+            and r["target_component_id"] == c2["id"]
+            and r["target_component_name"] == c2["name"]
             for r in rels
         )
 
@@ -327,12 +332,20 @@ class TestComponentRelationships:
         # Query from source side
         resp = await client.get(f"/api/components/{c1['id']}/relationships")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        assert any(
+            rel["source_component_name"] == c1["name"]
+            and rel["target_component_name"] == c2["name"]
+            for rel in resp.json()
+        )
 
         # Query from target side
         resp = await client.get(f"/api/components/{c2['id']}/relationships")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        assert any(
+            rel["source_component_name"] == c1["name"]
+            and rel["target_component_name"] == c2["name"]
+            for rel in resp.json()
+        )
 
     async def test_relationships_for_missing_component_returns_404(self, client, workspace):
         resp = await client.get(f"/api/components/{uuid4()}/relationships")

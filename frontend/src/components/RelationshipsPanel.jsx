@@ -102,8 +102,12 @@ export default function RelationshipsPanel({ modelId, components, isBackendData 
 }
 
 function RelationshipRow({ rel, componentMap }) {
-  const srcName = componentMap.get(rel.source_component_id) || shortId(rel.source_component_id);
-  const tgtName = componentMap.get(rel.target_component_id) || shortId(rel.target_component_id);
+  const srcName = rel.source_component_name
+    || componentMap.get(rel.source_component_id)
+    || shortId(rel.source_component_id);
+  const tgtName = rel.target_component_name
+    || componentMap.get(rel.target_component_id)
+    || shortId(rel.target_component_id);
   const confidencePct = Math.round(rel.confidence * 100);
   const sentimentCls = SENTIMENT_BADGE[rel.sentiment] || SENTIMENT_BADGE.neutral;
 

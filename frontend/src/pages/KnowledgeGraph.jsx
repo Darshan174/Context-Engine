@@ -34,9 +34,16 @@ export default function KnowledgeGraph() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold text-gray-800">Knowledge Graph</h2>
-        {isMock && <MockBadge />}
+      <div>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-gray-800">Knowledge Graph</h2>
+          {isMock && <MockBadge />}
+        </div>
+        {isMock && (
+          <p className="text-xs text-gray-400 mt-1">
+            Visual map of models, components, and their relationships. Showing demo data — live graph is coming in a future phase.
+          </p>
+        )}
       </div>
 
       {/* ── Controls ────────────────────────────── */}
@@ -46,6 +53,7 @@ export default function KnowledgeGraph() {
           placeholder="Search nodes..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search graph nodes"
           className="px-3 py-2 text-sm border border-gray-200 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
         />
         <div className="flex gap-1">

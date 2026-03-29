@@ -51,6 +51,7 @@ export default function ModelDetail() {
         {isBackendData && !showForm && (
           <button
             onClick={() => setShowForm(true)}
+            aria-label="Add component to model"
             className="px-4 py-2 text-sm font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 transition-colors shrink-0"
           >
             + Add Component
@@ -66,7 +67,10 @@ export default function ModelDetail() {
       {/* ── Component grid ──────────────────────── */}
       {components.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-          <p className="text-sm">No components yet. Add one to get started.</p>
+          <p className="text-sm">No components yet.</p>
+          <p className="text-xs mt-1">
+            Components are individual data points — metrics, KPIs, or facts — tracked within this model.
+          </p>
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -127,8 +131,9 @@ function AddComponentForm({ modelId, onClose }) {
       <h3 className="text-sm font-semibold text-gray-700 mb-4">Add component</h3>
       <form onSubmit={handleSubmit} className="grid sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+          <label htmlFor="comp-name" className="block text-xs font-medium text-gray-600 mb-1">Name</label>
           <input
+            id="comp-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -139,8 +144,9 @@ function AddComponentForm({ modelId, onClose }) {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Value</label>
+          <label htmlFor="comp-value" className="block text-xs font-medium text-gray-600 mb-1">Value</label>
           <input
+            id="comp-value"
             type="text"
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -150,8 +156,9 @@ function AddComponentForm({ modelId, onClose }) {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Confidence (0–1)</label>
+          <label htmlFor="comp-confidence" className="block text-xs font-medium text-gray-600 mb-1">Confidence (0–1)</label>
           <input
+            id="comp-confidence"
             type="number"
             step="0.01"
             min="0"
@@ -162,8 +169,9 @@ function AddComponentForm({ modelId, onClose }) {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Authority source</label>
+          <label htmlFor="comp-authority" className="block text-xs font-medium text-gray-600 mb-1">Authority source</label>
           <input
+            id="comp-authority"
             type="text"
             value={authoritySource}
             onChange={(e) => setAuthoritySource(e.target.value)}

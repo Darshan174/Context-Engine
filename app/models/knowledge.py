@@ -194,6 +194,18 @@ class Relationship(UUIDPrimaryKeyMixin, Base):
         foreign_keys=[target_component_id],
     )
 
+    @property
+    def source_component_name(self) -> str | None:
+        if self.source_component is None:
+            return None
+        return self.source_component.name
+
+    @property
+    def target_component_name(self) -> str | None:
+        if self.target_component is None:
+            return None
+        return self.target_component.name
+
 
 class ComponentSource(Base):
     __tablename__ = "component_sources"

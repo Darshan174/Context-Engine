@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     litellm_api_key: str | None = None
     cohere_api_key: str | None = None
+    encryption_key: str | None = None
+    slack_client_id: str | None = None
+    slack_client_secret: str | None = None
+    slack_redirect_uri: str | None = None
+    oauth_state_ttl_seconds: int = 600
 
     model_config = SettingsConfigDict(
         env_file=".env",

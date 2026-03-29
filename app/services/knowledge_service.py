@@ -98,8 +98,7 @@ class KnowledgeService:
         relationship = Relationship(**payload)
         self.session.add(relationship)
         await self._commit_or_raise("Unable to create relationship with the provided data")
-        await self.session.refresh(relationship)
-        return relationship
+        return await self._get_relationship(relationship.id)
 
     async def get_model_relationships(self, model_id: UUID) -> list[Relationship]:
         await self.get_model(model_id)
@@ -138,6 +137,19 @@ class KnowledgeService:
             .order_by(Relationship.created_at.desc())
         )
         return list(result)
+
+    async def _get_relationship(self, relationship_id: UUID) -> Relationship:
+        relationship = await self.session.scalar(
+            select(Relationship)
+            .options(
+                selectinload(Relationship.source_component),
+                selectinload(Relationship.target_component),
+            )
+            .where(Relationship.id == relationship_id)
+        )
+        if relationship is None:
+            raise ResourceNotFoundError("Relationship not found")
+        return relationship
 
     def _model_select(self, model_id: UUID) -> Select[tuple[KnowledgeModel]]:
         return (

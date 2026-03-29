@@ -84,7 +84,9 @@ class RelationshipRead(BaseModel):
 
     id: UUID
     source_component_id: UUID
+    source_component_name: str | None = None
     target_component_id: UUID
+    target_component_name: str | None = None
     relationship_type: RelationshipType
     sentiment: RelationshipSentiment
     description: str | None

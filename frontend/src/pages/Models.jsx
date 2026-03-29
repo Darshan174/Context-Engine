@@ -34,6 +34,7 @@ export default function Models() {
           <button
             key={m.id}
             onClick={() => navigate(`/model/${m.id}`)}
+            aria-label={`Open model ${m.name}`}
             className="bg-white rounded-xl border border-gray-200 p-5 text-left hover:shadow-md transition-shadow"
           >
             <h3 className="text-sm font-semibold text-gray-800">{m.name}</h3>
@@ -55,10 +56,16 @@ function Wrapper({ children, onAdd, showAdd }) {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-800">Models</h2>
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">Models</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            A model groups related components into a structured view of your business.
+          </p>
+        </div>
         {showAdd && (
           <button
             onClick={onAdd}
+            aria-label="Create new model"
             className="px-4 py-2 text-sm font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 transition-colors"
           >
             + New Model
@@ -95,8 +102,9 @@ function CreateModelForm({ onClose }) {
       <h3 className="text-sm font-semibold text-gray-700 mb-4">Create a new model</h3>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+          <label htmlFor="model-name" className="block text-xs font-medium text-gray-600 mb-1">Name</label>
           <input
+            id="model-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -107,8 +115,9 @@ function CreateModelForm({ onClose }) {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+          <label htmlFor="model-description" className="block text-xs font-medium text-gray-600 mb-1">Description</label>
           <input
+            id="model-description"
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}

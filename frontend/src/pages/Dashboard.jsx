@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useDashboard } from "../api/hooks";
 import StatusView from "../components/StatusView";
 
@@ -12,11 +13,17 @@ export default function Dashboard() {
     );
   }
 
-  const { stats, activity, alerts } = query.data;
+  const { stats = [], activity = [], alerts = [] } = query.data;
+  const isEmpty = stats.length > 0 && stats.every((s) => s.value === 0);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <h2 className="text-lg font-semibold text-gray-800">Overview</h2>
+      <div>
+        <h2 className="text-lg font-semibold text-gray-800">Overview</h2>
+        <p className="text-xs text-gray-400 mt-1">
+          Your workspace at a glance — models, components, and data health.
+        </p>
+      </div>
 
       {/* ── Stat cards ──────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -31,6 +38,19 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {isEmpty && (
+        <div className="bg-brand-50 border border-brand-200 rounded-xl p-5 text-center">
+          <p className="text-sm font-medium text-brand-800">Your workspace is empty</p>
+          <p className="text-xs text-brand-600 mt-1">
+            Head to{" "}
+            <Link to="/models" className="underline font-medium">
+              Models
+            </Link>{" "}
+            to create your first model and start adding components.
+          </p>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* ── Recent activity ────────────────────── */}

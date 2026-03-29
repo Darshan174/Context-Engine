@@ -9,7 +9,7 @@
 export default function StatusView({ query, empty = "Nothing here yet." }) {
   if (query.isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+      <div role="status" aria-live="polite" className="flex flex-col items-center justify-center py-24 text-gray-400">
         <Spinner />
         <p className="mt-3 text-sm">Loading...</p>
       </div>
@@ -20,7 +20,7 @@ export default function StatusView({ query, empty = "Nothing here yet." }) {
     const msg =
       query.error?.message || query.error?.detail || "Something went wrong.";
     return (
-      <div className="flex flex-col items-center justify-center py-24">
+      <div role="alert" className="flex flex-col items-center justify-center py-24">
         <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mb-3">
           <span className="text-red-500 text-lg font-bold">!</span>
         </div>

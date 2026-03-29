@@ -1,0 +1,146 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import KnowledgeGraph from "../KnowledgeGraph";
+
+vi.mock("../../api/hooks", () => ({
+  useKnowledgeGraph: vi.fn(),
+}));
+
+vi.mock("../../components/GraphVisualizer", () => ({
+  default: ({ nodes, edges }) => (
+    <div data-testid="graph-viz">
+      {nodes.length} nodes, {edges.length} edges
+    </div>
+  ),
+}));
+
+vi.mock("../../components/RelationshipEdge", () => ({
+  default: ({ sourceLabel, targetLabel, label }) => (
+    <div data-testid="rel-edge">
+      {sourceLabel} —{label}— {targetLabel}
+    </div>
+  ),
+}));
+
+import { useKnowledgeGraph } from "../../api/hooks";
+
+const mockNodes = [
+  { id: "n1", label: "Revenue Model", type: "model", x: 300, y: 200 },
+  { id: "n2", label: "Slack #eng", type: "source", x: 120, y: 300 },
+  { id: "n3", label: "MRR", type: "component", x: 480, y: 340 },
+];
+const mockEdges = [
+  { source: "n2", target: "n1", label: "feeds" },
+  { source: "n1", target: "n3", label: "drives" },
+];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("KnowledgeGraph", () => {
+  it("shows loading state", () => {
+    useKnowledgeGraph.mockReturnValue({
+      data: undefined,
+      isMock: false,
+      isLoading: true,
+      isError: false,
+    });
+
+    render(<KnowledgeGraph />);
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+  });
+
+  it("renders graph with MockBadge when mock-backed", () => {
+    useKnowledgeGraph.mockReturnValue({
+      data: { nodes: mockNodes, edges: mockEdges },
+      isMock: true,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<KnowledgeGraph />);
+
+    expect(screen.getByText("Knowledge Graph")).toBeInTheDocument();
+    expect(screen.getByText(/Demo data/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing demo data/)).toBeInTheDocument();
+    expect(screen.getByTestId("graph-viz")).toHaveTextContent("3 nodes, 2 edges");
+  });
+
+  it("hides MockBadge for real data", () => {
+    useKnowledgeGraph.mockReturnValue({
+      data: { nodes: mockNodes, edges: mockEdges },
+      isMock: false,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<KnowledgeGraph />);
+
+    expect(screen.getByText("Knowledge Graph")).toBeInTheDocument();
+    expect(screen.queryByText(/Demo data/)).not.toBeInTheDocument();
+  });
+
+  it("filters nodes by search text", async () => {
+    useKnowledgeGraph.mockReturnValue({
+      data: { nodes: mockNodes, edges: mockEdges },
+      isMock: false,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<KnowledgeGraph />);
+
+    await userEvent.type(screen.getByLabelText("Search graph nodes"), "Revenue");
+
+    // Only Revenue Model matches, so MRR and Slack are excluded
+    expect(screen.getByTestId("graph-viz")).toHaveTextContent("1 nodes, 0 edges");
+  });
+
+  it("filters nodes by type", async () => {
+    useKnowledgeGraph.mockReturnValue({
+      data: { nodes: mockNodes, edges: mockEdges },
+      isMock: false,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<KnowledgeGraph />);
+
+    await userEvent.click(screen.getByText("source"));
+
+    // Only Slack #eng is a source
+    expect(screen.getByTestId("graph-viz")).toHaveTextContent("1 nodes, 0 edges");
+  });
+
+  it("renders edge list", () => {
+    useKnowledgeGraph.mockReturnValue({
+      data: { nodes: mockNodes, edges: mockEdges },
+      isMock: false,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<KnowledgeGraph />);
+
+    const edges = screen.getAllByTestId("rel-edge");
+    expect(edges).toHaveLength(2);
+    expect(edges[0]).toHaveTextContent("Slack #eng");
+    expect(edges[0]).toHaveTextContent("feeds");
+    expect(edges[0]).toHaveTextContent("Revenue Model");
+  });
+
+  it("shows count summary", () => {
+    useKnowledgeGraph.mockReturnValue({
+      data: { nodes: mockNodes, edges: mockEdges },
+      isMock: false,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<KnowledgeGraph />);
+
+    expect(screen.getByText(/3\/3 nodes/)).toBeInTheDocument();
+    expect(screen.getByText(/2\/2 edges/)).toBeInTheDocument();
+  });
+});
