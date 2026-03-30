@@ -39,7 +39,7 @@ describe("Dashboard", () => {
       isError: false,
       data: {
         stats: [
-          { label: "Sources", value: 3, delta: "+1" },
+          { label: "Sources", value: 42, delta: "1 connector active" },
           { label: "Models", value: 2, delta: "stable" },
           { label: "Components", value: 15, delta: "+5" },
           { label: "Relationships", value: 8, delta: "+2" },
@@ -53,6 +53,10 @@ describe("Dashboard", () => {
     renderDashboard();
     expect(screen.getByText("Sources")).toBeInTheDocument();
     expect(screen.getByText("15")).toBeInTheDocument();
+    expect(screen.getByText("Live source data is available")).toBeInTheDocument();
+    expect(screen.getByText(/stored and ready for extraction and query/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Inspect source documents" })).toHaveAttribute("href", "/sources");
+    expect(screen.getByRole("link", { name: /Sources/ })).toHaveAttribute("href", "/sources");
     expect(screen.queryByText("Your workspace is empty")).not.toBeInTheDocument();
   });
 

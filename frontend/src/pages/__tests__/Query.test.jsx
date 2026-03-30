@@ -311,6 +311,7 @@ describe("Query — no-match response", () => {
 
     expect(screen.getByText("No grounded answer found")).toBeInTheDocument();
     expect(screen.getByText(/could not find matching/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connectors" })).toHaveAttribute("href", "/connectors");
     // Should NOT render like a normal answer card
     expect(screen.queryByText("Confidence")).not.toBeInTheDocument();
     expect(screen.queryByText("Cited Components")).not.toBeInTheDocument();
@@ -355,6 +356,9 @@ describe("Query — real backend success response", () => {
 
     // Answer text
     expect(screen.getByText("Current MRR is $3.1M based on Stripe data.")).toBeInTheDocument();
+    expect(screen.getByText("Live backend")).toBeInTheDocument();
+    expect(screen.getByText("Live workspace context")).toBeInTheDocument();
+    expect(screen.getByText("Grounded in 1 component from 2 sources.")).toBeInTheDocument();
     // Confidence
     expect(screen.getByText("92%")).toBeInTheDocument();
     // Freshness badge

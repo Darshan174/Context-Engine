@@ -18,6 +18,9 @@ class ConnectorRead(BaseModel):
     status: str
     last_sync_at: datetime | None
     config: dict[str, Any]
+    provider: str | None = None
+    provider_label: str | None = None
+    provider_note: str | None = None
 
 
 class ConnectorSyncResponse(BaseModel):

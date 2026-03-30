@@ -3,14 +3,16 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, String, Text, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, UniqueConstraint, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
 from app.models.base import Base, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from app.models.connector import Connector
     from app.models.knowledge import Component, ComponentSource
 
 
@@ -27,8 +29,14 @@ def enum_values(enum_cls: type[enum.Enum]) -> list[str]:
 
 class SourceDocument(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "source_documents"
-    __table_args__ = (UniqueConstraint("connector_type", "external_id"),)
+    __table_args__ = (UniqueConstraint("connector_id", "external_id"),)
 
+    connector_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("connectors.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     connector_type: Mapped[ConnectorType] = mapped_column(
         Enum(
             ConnectorType,
@@ -48,6 +56,11 @@ class SourceDocument(UUIDPrimaryKeyMixin, Base):
         server_default=func.now(),
         nullable=False,
     )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
@@ -55,6 +68,8 @@ class SourceDocument(UUIDPrimaryKeyMixin, Base):
         default=dict,
         server_default=text("'{}'::jsonb"),
     )
+
+    connector: Mapped["Connector"] = orm_relationship(foreign_keys=[connector_id])
 
     component_links: Mapped[list["ComponentSource"]] = orm_relationship(
         back_populates="source_document",

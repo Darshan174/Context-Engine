@@ -37,7 +37,15 @@ export default function Query() {
       <div className="flex items-center gap-3">
         <h2 className="text-lg font-semibold text-gray-800">Context Query</h2>
         {isMock && result && <MockBadge />}
+        {!isMock && result && (
+          <span className="px-2 py-0.5 text-[11px] rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
+            Live backend
+          </span>
+        )}
       </div>
+      <p className="text-xs text-gray-400">
+        Query your workspace context. Live backend answers are preferred; demo answers only appear when the backend is unreachable.
+      </p>
 
       {/* ── Input ───────────────────────────────── */}
       <form onSubmit={handleSubmit} className="flex gap-3">
@@ -96,6 +104,15 @@ export default function Query() {
             <p className="text-xs text-amber-600">
               {result.answer || "The knowledge graph does not contain enough structured context to answer this question."}
             </p>
+            {!isMock && (
+              <p className="text-xs text-amber-700">
+                If you recently connected Slack, run a sync from{" "}
+                <a href="/connectors" className="underline underline-offset-2">
+                  Connectors
+                </a>{" "}
+                and try again.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -110,6 +127,17 @@ export default function Query() {
 
           {/* Answer body */}
           <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+            {!isMock && (
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                  Live workspace context
+                </span>
+                <span>
+                  Grounded in {result.components?.length ?? 0} component{result.components?.length === 1 ? "" : "s"}
+                  {" "}from {result.sources?.length ?? 0} source{result.sources?.length === 1 ? "" : "s"}.
+                </span>
+              </div>
+            )}
             {result.answer ? (
               <div className="text-sm text-gray-800 leading-relaxed space-y-2">
                 {result.answer.split("\n").filter(Boolean).map((line, i) => (

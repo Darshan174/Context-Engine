@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.connectors.strategy import get_connector_strategy
 from app.database import get_db_session
 from app.schemas.connector import ConnectorRead, ConnectorSyncResponse
 from app.services.connector_service import (
@@ -16,6 +17,7 @@ from app.services.connector_service import (
     ConnectorService,
     InvalidStateError,
     OAuthError,
+    SyncError,
     WorkspaceNotFoundError,
 )
 
@@ -25,6 +27,21 @@ router = APIRouter()
 
 def _service(session: AsyncSession = Depends(get_db_session)) -> ConnectorService:
     return ConnectorService(session)
+
+
+def _serialize_connector(connector) -> ConnectorRead:
+    strategy = get_connector_strategy(connector.connector_type)
+    return ConnectorRead(
+        id=connector.id,
+        workspace_id=connector.workspace_id,
+        connector_type=connector.connector_type.value,
+        status=connector.status.value,
+        last_sync_at=connector.last_sync_at,
+        config=connector.config,
+        provider=strategy.provider.value,
+        provider_label=strategy.provider_label,
+        provider_note=strategy.note,
+    )
 
 
 @router.get("/connectors", response_model=list[ConnectorRead])
@@ -39,7 +56,7 @@ async def list_connectors(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workspace not found",
         )
-    return [ConnectorRead.model_validate(c) for c in connectors]
+    return [_serialize_connector(c) for c in connectors]
 
 
 @router.get("/connectors/slack/install")
@@ -98,7 +115,7 @@ async def slack_callback(
             detail=str(exc),
         )
 
-    return ConnectorRead.model_validate(connector)
+    return _serialize_connector(connector)
 
 
 @router.post(
@@ -116,10 +133,20 @@ async def sync_connector(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Connector not found",
         )
+    except SyncError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        )
+    except ConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        )
     return ConnectorSyncResponse(
         id=connector.id,
-        status="queued",
-        message="Sync queued (placeholder — real Celery dispatch in a later phase)",
+        status="completed",
+        message=connector.config.get("message", "Sync completed"),
         last_sync_at=connector.last_sync_at,
     )
 

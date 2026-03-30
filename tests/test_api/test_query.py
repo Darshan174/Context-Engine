@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from app.models import (
     Component,
     ComponentSource,
+    Connector,
+    ConnectorStatus,
     ConnectorType,
     KnowledgeModel,
     Relationship,
@@ -52,6 +54,7 @@ async def _link_source(
     db_session,
     *,
     component_id,
+    connector_id,
     connector_type: ConnectorType,
     external_id: str,
     author: str,
@@ -60,6 +63,7 @@ async def _link_source(
     created_at_source: datetime,
 ) -> SourceDocument:
     document = SourceDocument(
+        connector_id=connector_id,
         connector_type=connector_type,
         external_id=external_id,
         content=content,
@@ -105,6 +109,16 @@ async def _create_relationship(
 
 class TestQueryAPI:
     async def test_post_query_returns_structured_match(self, client, db_session, workspace):
+        # Create a connector so SourceDocuments have an owner
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
         pricing = await _create_model(db_session, workspace.id, "Pricing", "Pricing and packaging")
         enterprise = await _create_component(
             db_session,
@@ -127,6 +141,7 @@ class TestQueryAPI:
         await _link_source(
             db_session,
             component_id=enterprise.id,
+            connector_id=conn.id,
             connector_type=ConnectorType.SLACK,
             external_id="slack-pricing-1",
             author="CEO",

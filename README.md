@@ -14,6 +14,17 @@ This repository currently includes the foundation for:
 - Docker Compose services for PostgreSQL and Redis
 - Backend project structure for later CRUD, connector, and processing work
 
+## Connector Strategy
+
+The connector layer is intentionally mixed:
+
+- `Slack` stays built in because OAuth, thread expansion, and real-time events are product-critical.
+- `Notion` is planned to use a `dlt` verified source rather than a full hand-built sync.
+- `Google Drive` is planned to use `Unstructured` for ingestion and document extraction.
+- `Gong` is expected to stay on the official API because transcript semantics matter more than generic ETL.
+
+This keeps the product-specific parts in-house while reusing OSS where it actually helps.
+
 ## Quick Start
 
 1. Copy `.env.example` to `.env`

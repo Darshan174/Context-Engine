@@ -2,6 +2,12 @@ import { Link } from "react-router-dom";
 import { useDashboard } from "../api/hooks";
 import StatusView from "../components/StatusView";
 
+const DESTINATIONS = {
+  Sources: "/sources",
+  Models: "/models",
+  Relationships: "/graph",
+};
+
 export default function Dashboard() {
   const query = useDashboard();
 
@@ -21,21 +27,22 @@ export default function Dashboard() {
       <div>
         <h2 className="text-lg font-semibold text-gray-800">Overview</h2>
         <p className="text-xs text-gray-400 mt-1">
-          Your workspace at a glance — models, components, and data health.
+          Your workspace at a glance — source documents, models, components, and data health.
         </p>
       </div>
 
       {/* ── Stat cards ──────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s) => (
-          <div
+          <Link
             key={s.label}
-            className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-sm transition-shadow"
+            to={DESTINATIONS[s.label] ?? "/query"}
+            className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-sm transition-shadow block"
           >
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{s.label}</p>
             <p className="mt-1 text-2xl font-bold text-gray-900">{s.value.toLocaleString()}</p>
             <p className="mt-1 text-xs text-gray-400">{s.delta}</p>
-          </div>
+          </Link>
         ))}
       </div>
 
@@ -49,6 +56,17 @@ export default function Dashboard() {
             </Link>{" "}
             to create your first model and start adding components.
           </p>
+        </div>
+      )}
+      {!isEmpty && stats.some((s) => s.label === "Sources" && s.value > 0) && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+          <p className="text-sm font-medium text-emerald-800">Live source data is available</p>
+          <p className="text-xs text-emerald-700 mt-1">
+            Synced connector documents are stored and ready for extraction and query.
+          </p>
+          <Link to="/sources" className="inline-flex mt-3 text-xs font-medium text-emerald-800 underline">
+            Inspect source documents
+          </Link>
         </div>
       )}
 

@@ -63,6 +63,58 @@ export const connectors = [
   },
 ];
 
+// ── Source documents ───────────────────────────────────────────
+export const sourceDocuments = [
+  {
+    id: "sd1",
+    connectorType: "slack",
+    externalId: "C-price:1711699200.000100",
+    author: "Alice Chen",
+    content: "decision: enterprise pricing moves to $600/seat starting next quarter",
+    sourceUrl: "https://slack.com/archives/C-price/p1711699200000100",
+    createdAtSource: "2026-03-29T09:20:00Z",
+    ingestedAt: "2026-03-29T09:22:00Z",
+    processedAt: "2026-03-29T09:23:00Z",
+    metadata: { channel_name: "pricing", location: "#pricing" },
+  },
+  {
+    id: "sd2",
+    connectorType: "slack",
+    externalId: "C-prod:1711702800.000200",
+    author: "Rahul Verma",
+    content: "blocker: SSO rollout is blocked by audit review and enterprise procurement timing",
+    sourceUrl: "https://slack.com/archives/C-prod/p1711702800000200",
+    createdAtSource: "2026-03-29T10:20:00Z",
+    ingestedAt: "2026-03-29T10:21:00Z",
+    processedAt: null,
+    metadata: { channel_name: "product", location: "#product" },
+  },
+  {
+    id: "sd3",
+    connectorType: "notion",
+    externalId: "notion:page-abc-123",
+    author: "alice@example.com",
+    content: "Engineering Roadmap\n\nWe are targeting Q3 for the SSO launch.\n\n# Key Decisions\n\n- Adopt SAML over OIDC",
+    sourceUrl: "https://notion.so/eng-roadmap-abc123",
+    createdAtSource: "2026-03-28T10:00:00Z",
+    ingestedAt: "2026-03-29T14:05:00Z",
+    processedAt: "2026-03-29T14:06:00Z",
+    metadata: { page_id: "page-abc-123", location: "Engineering Roadmap" },
+  },
+  {
+    id: "sd4",
+    connectorType: "notion",
+    externalId: "notion:page-pricing-456",
+    author: "bob@example.com",
+    content: "Pricing Strategy\n\naction item: update enterprise packaging copy before launch",
+    sourceUrl: "https://notion.so/pricing-strategy-456",
+    createdAtSource: "2026-03-29T12:30:00Z",
+    ingestedAt: "2026-03-29T14:07:00Z",
+    processedAt: null,
+    metadata: { page_id: "page-pricing-456", location: "Pricing Strategy" },
+  },
+];
+
 // ── Knowledge graph nodes & edges (placeholder) ────────────────
 export const graphNodes = [
   { id: "n1", label: "Q1 Revenue Model", type: "model", x: 300, y: 200 },

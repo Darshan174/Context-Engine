@@ -6,6 +6,7 @@ import Connectors from "./pages/Connectors";
 import KnowledgeGraph from "./pages/KnowledgeGraph";
 import ModelDetail from "./pages/ModelDetail";
 import Query from "./pages/Query";
+import Sources from "./pages/Sources";
 import WorkspaceBootstrap from "./components/WorkspaceBootstrap";
 import WorkspaceSwitcher from "./components/WorkspaceSwitcher";
 
@@ -14,6 +15,7 @@ const NAV = [
   { to: "/models", label: "Models", icon: CubeIcon },
   { to: "/query", label: "Query", icon: SearchIcon },
   { to: "/connectors", label: "Connectors", icon: PlugIcon },
+  { to: "/sources", label: "Sources", icon: DocumentStackIcon },
   { to: "/graph", label: "Knowledge Graph", icon: GraphIcon },
 ];
 
@@ -119,6 +121,7 @@ export default function App() {
               <Route path="/models" element={<Models />} />
               <Route path="/query" element={<Query />} />
               <Route path="/connectors" element={<Connectors />} />
+              <Route path="/sources" element={<Sources />} />
               <Route path="/graph" element={<KnowledgeGraph />} />
               <Route path="/model/:modelId" element={<ModelDetail />} />
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -180,6 +183,16 @@ function HamburgerIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+function DocumentStackIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8M8 11h8M8 15h5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 3h9a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 21h9a2 2 0 002-2V8" />
     </svg>
   );
 }
