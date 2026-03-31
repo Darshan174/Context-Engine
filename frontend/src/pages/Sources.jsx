@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { useSourceDocuments } from "../api/hooks";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  useConnectorProcessingSummary,
+  useReprocessSourceDocument,
+  useSourceDocument,
+  useSourceDocumentComponents,
+  useSourceDocumentReviewItems,
+  useSourceDocuments,
+} from "../api/hooks";
 import MockBadge from "../components/MockBadge";
 import StatusView from "../components/StatusView";
 
@@ -27,27 +34,57 @@ const CONNECTOR_PILL = {
 };
 
 export default function Sources() {
+  const navigate = useNavigate();
+  const { documentId } = useParams();
   const [connector, setConnector] = useState("all");
   const [processed, setProcessed] = useState("all");
   const [search, setSearch] = useState("");
-  const { data, isMock, ...query } = useSourceDocuments({ connector, processed, search });
+  const {
+    data,
+    total,
+    hasMore,
+    fetchNextPage,
+    isFetchingNextPage,
+    isMock,
+    ...query
+  } = useSourceDocuments({ connector, processed, search });
+  const summaryQuery = useConnectorProcessingSummary();
+  const reprocessMut = useReprocessSourceDocument();
   const documents = data ?? [];
-  const [selectedId, setSelectedId] = useState(null);
+  const [reprocessMessage, setReprocessMessage] = useState("");
+  const [reprocessError, setReprocessError] = useState("");
+  const selectedFromList = useMemo(
+    () => documents.find((doc) => doc.id === documentId) ?? null,
+    [documents, documentId],
+  );
+  const detailQuery = useSourceDocument(documentId && !selectedFromList ? documentId : null);
 
   useEffect(() => {
     if (documents.length === 0) {
-      setSelectedId(null);
       return;
     }
-    if (!selectedId || !documents.some((doc) => doc.id === selectedId)) {
-      setSelectedId(documents[0].id);
+    const inList = documentId ? documents.some((doc) => doc.id === documentId) : false;
+    if (!documentId) {
+      navigate(`/app/sources/${documents[0].id}`, { replace: true });
+      return;
     }
-  }, [documents, selectedId]);
+    if (!inList && !detailQuery.isLoading && !detailQuery.data) {
+      navigate(`/app/sources/${documents[0].id}`, { replace: true });
+    }
+  }, [documents, documentId, detailQuery.data, detailQuery.isLoading, navigate]);
 
   const selectedDocument = useMemo(
-    () => documents.find((doc) => doc.id === selectedId) ?? null,
-    [documents, selectedId],
+    () => selectedFromList ?? detailQuery.data ?? null,
+    [selectedFromList, detailQuery.data],
   );
+
+  useEffect(() => {
+    setReprocessMessage("");
+    setReprocessError("");
+  }, [selectedDocument?.id]);
+
+  const componentRefsQuery = useSourceDocumentComponents(selectedDocument?.id ?? null);
+  const reviewRefsQuery = useSourceDocumentReviewItems(selectedDocument?.id ?? null);
 
   if (query.isLoading || query.isError) {
     return (
@@ -59,6 +96,8 @@ export default function Sources() {
 
   const processedCount = documents.filter((doc) => doc.processed).length;
   const pendingCount = documents.length - processedCount;
+  const summaries = summaryQuery.data?.items ?? [];
+  const showLoadMore = !isMock && hasMore;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -84,6 +123,43 @@ export default function Sources() {
           </p>
         </div>
       </div>
+
+      {summaries.length > 0 && (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {summaries.map((summary) => (
+            <div
+              key={summary.connectorType}
+              className="rounded-xl border border-gray-200 bg-white px-4 py-3"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-gray-700 capitalize">
+                  {summary.connectorType}
+                </p>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                    summary.status === "connected"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : summary.status === "error"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {summary.status}
+                </span>
+              </div>
+              <p className="mt-3 text-lg font-semibold text-gray-800">
+                {summary.totalDocuments}
+              </p>
+              <p className="text-xs text-gray-500">
+                {summary.processedDocuments} processed · {summary.unprocessedDocuments} pending
+              </p>
+              <p className="mt-2 text-[11px] text-gray-400">
+                Last sync {summary.lastSyncAt}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_220px]">
         <label className="block">
@@ -146,10 +222,10 @@ export default function Sources() {
               <div>
                 <p className="text-sm font-semibold text-gray-700">Stored documents</p>
                 <p className="text-xs text-gray-400">
-                  Select a document to inspect its raw content and lineage.
+                  Showing {documents.length} loaded{typeof total === "number" ? ` of ${total}` : ""}. Select a document to inspect its raw content and lineage.
                 </p>
               </div>
-              <Link to="/connectors" className="text-xs font-medium text-brand-700 hover:text-brand-800">
+              <Link to="/app/connectors" className="text-xs font-medium text-brand-700 hover:text-brand-800">
                 Back to connectors
               </Link>
             </div>
@@ -159,10 +235,10 @@ export default function Sources() {
                 <button
                   key={doc.id}
                   type="button"
-                  onClick={() => setSelectedId(doc.id)}
-                  aria-pressed={selectedId === doc.id}
+                  onClick={() => navigate(`/app/sources/${doc.id}`)}
+                  aria-pressed={documentId === doc.id}
                   className={`w-full text-left px-4 py-4 transition-colors ${
-                    selectedId === doc.id ? "bg-brand-50" : "hover:bg-gray-50"
+                    documentId === doc.id ? "bg-brand-50" : "hover:bg-gray-50"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -201,26 +277,93 @@ export default function Sources() {
                 </button>
               ))}
             </div>
+            {showLoadMore && (
+              <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
+                <button
+                  type="button"
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+                >
+                  {isFetchingNextPage ? "Loading more..." : "Load more documents"}
+                </button>
+              </div>
+            )}
           </section>
 
           <section
             aria-label="Document detail"
             className="bg-white rounded-xl border border-gray-200 p-5 space-y-4"
           >
-            {selectedDocument ? (
+            {detailQuery.isError && !selectedDocument ? (
+              <StatusView
+                query={{ isLoading: false, isError: true, error: detailQuery.error, refetch: detailQuery.refetch }}
+                empty=""
+              />
+            ) : detailQuery.isLoading && !selectedDocument ? (
+              <StatusView query={{ isLoading: true, isError: false }} empty="" />
+            ) : selectedDocument ? (
               <>
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-gray-700">Document detail</h3>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                      selectedDocument.processed
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-amber-100 text-amber-700"
-                    }`}
-                  >
-                    {selectedDocument.processed ? "Processed" : "Pending extraction"}
-                  </span>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700">Document detail</h3>
+                    <p className="mt-1 text-xs text-gray-400">
+                      Inspect raw content, downstream usage, and re-run extraction when the source changes.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!isMock && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReprocessMessage("");
+                          setReprocessError("");
+                          reprocessMut.mutate(selectedDocument.id, {
+                            onSuccess: (job) => {
+                              setReprocessMessage(
+                                `${job.jobType === "reprocess" ? "Reprocess" : "Processing"} queued as ${job.status}.`,
+                              );
+                            },
+                            onError: (err) => {
+                              setReprocessError(err?.message || "Failed to queue reprocess.");
+                            },
+                          });
+                        }}
+                        disabled={
+                          reprocessMut.isPending &&
+                          reprocessMut.variables === selectedDocument.id
+                        }
+                        className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {reprocessMut.isPending && reprocessMut.variables === selectedDocument.id
+                          ? "Queueing..."
+                          : selectedDocument.processed
+                            ? "Reprocess"
+                            : "Run extraction"}
+                      </button>
+                    )}
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                        selectedDocument.processed
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {selectedDocument.processed ? "Processed" : "Pending extraction"}
+                    </span>
+                  </div>
                 </div>
+
+                {reprocessMessage && (
+                  <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                    {reprocessMessage}
+                  </p>
+                )}
+                {reprocessError && (
+                  <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {reprocessError}
+                  </p>
+                )}
 
                 <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-2 text-xs">
                   <dt className="text-gray-400">Connector</dt>
@@ -248,6 +391,82 @@ export default function Sources() {
                   >
                     Open original source
                   </a>
+                )}
+
+                {(componentRefsQuery.data?.length > 0 || reviewRefsQuery.data?.length > 0) && (
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                      <p className="text-xs font-medium text-gray-600 mb-2">Used in components</p>
+                      {componentRefsQuery.data?.length ? (
+                        <div className="space-y-2">
+                          {componentRefsQuery.data.map((component) => (
+                            <Link
+                              key={`${component.modelId ?? "model"}:${component.id}`}
+                              to={component.modelId ? `/app/model/${component.modelId}` : "/app/models"}
+                              className="block rounded-lg border border-gray-200 bg-white px-3 py-2 hover:border-brand-200 hover:bg-brand-50 transition-colors"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-800 truncate">{component.name}</p>
+                                  <p className="mt-1 text-xs text-gray-500 truncate">
+                                    {component.modelName} · {component.value || "No extracted value"}
+                                  </p>
+                                </div>
+                                {component.reviewStatus && (
+                                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                                    {component.reviewStatus.replaceAll("_", " ")}
+                                  </span>
+                                )}
+                              </div>
+                            </Link>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500">
+                          No extracted components are linked to this source document yet.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                      <p className="text-xs font-medium text-gray-600 mb-2">Related review items</p>
+                      {reviewRefsQuery.data?.length ? (
+                        <div className="space-y-2">
+                          {reviewRefsQuery.data.map((item) => (
+                            <Link
+                              key={item.id}
+                              to={`/app/review/${item.id}`}
+                              className="block rounded-lg border border-gray-200 bg-white px-3 py-2 hover:border-brand-200 hover:bg-brand-50 transition-colors"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-800 truncate">{item.title}</p>
+                                  <p className="mt-1 text-xs text-gray-500 truncate">
+                                    {item.kind.replaceAll("_", " ")} · {item.model || "Unscoped"}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                    item.status === "approved"
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : item.status === "superseded"
+                                        ? "bg-slate-100 text-slate-600"
+                                        : "bg-amber-100 text-amber-700"
+                                  }`}
+                                >
+                                  {item.status.replaceAll("_", " ")}
+                                </span>
+                              </div>
+                            </Link>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500">
+                          No review queue items reference this source document right now.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 <div>

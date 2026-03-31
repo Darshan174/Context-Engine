@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { useContextQuery } from "../api/hooks";
+import { useComponentSources, useContextQuery } from "../api/hooks";
 import MockBadge from "../components/MockBadge";
+import SourceDocumentLinks from "../components/SourceDocumentLinks";
+import TrustStatePanel from "../components/TrustStatePanel";
 
 const FRESHNESS_STYLE = {
   current: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -14,22 +16,38 @@ const FRESHNESS_LABEL = {
   stale: "Stale",
 };
 
+const WINDOW_OPTIONS = [
+  { value: "all", label: "All time" },
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+];
+
 export default function Query() {
   const [input, setInput] = useState("");
+  const [windowDays, setWindowDays] = useState("all");
+  const [lastRequestMeta, setLastRequestMeta] = useState({ question: "", maxAgeDays: null });
   const mutation = useContextQuery();
   const result = mutation.data;
+  const components = result?.components ?? [];
+  const currentComponents = components.filter((component) => !isHistoricalComponent(component));
+  const historicalComponents = components.filter(isHistoricalComponent);
   const isMock = result?._isMock ?? false;
   const isNoMatch =
     result &&
     result.confidence === 0 &&
-    (!result.components || result.components.length === 0) &&
+    components.length === 0 &&
     (!result.sources || result.sources.length === 0);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const q = input.trim();
     if (!q) return;
-    mutation.mutate(q);
+    const payload = buildQueryPayload(q, windowDays);
+    setLastRequestMeta({
+      question: q,
+      maxAgeDays: payload.maxAgeDays ?? null,
+    });
+    mutation.mutate(payload.maxAgeDays != null ? payload : payload.question);
   };
 
   return (
@@ -48,22 +66,44 @@ export default function Query() {
       </p>
 
       {/* ── Input ───────────────────────────────── */}
-      <form onSubmit={handleSubmit} className="flex gap-3">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask a question about your company data..."
-          aria-label="Query input"
-          className="flex-1 px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-        />
-        <button
-          type="submit"
-          disabled={mutation.isPending || !input.trim()}
-          className="px-5 py-2.5 text-sm font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 transition-colors shrink-0"
-        >
-          {mutation.isPending ? "Thinking..." : "Ask"}
-        </button>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="flex gap-3">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask a question about your company data..."
+            aria-label="Query input"
+            className="flex-1 px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          />
+          <button
+            type="submit"
+            disabled={mutation.isPending || !input.trim()}
+            className="px-5 py-2.5 text-sm font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 transition-colors shrink-0"
+          >
+            {mutation.isPending ? "Thinking..." : "Ask"}
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-gray-500">
+            <span>Context window</span>
+            <select
+              value={windowDays}
+              onChange={(e) => setWindowDays(e.target.value)}
+              aria-label="Context window"
+              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            >
+              {WINDOW_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-[11px] text-gray-400">
+            Limit answers to recently verified context when you want a tighter temporal window.
+          </p>
+        </div>
       </form>
 
       {/* ── Loading ─────────────────────────────── */}
@@ -84,7 +124,14 @@ export default function Query() {
             {mutation.error?.message || "Failed to get an answer."}
           </p>
           <button
-            onClick={() => mutation.mutate(input.trim())}
+            onClick={() => {
+              const payload = buildQueryPayload(input.trim(), windowDays);
+              setLastRequestMeta({
+                question: input.trim(),
+                maxAgeDays: payload.maxAgeDays ?? null,
+              });
+              mutation.mutate(payload.maxAgeDays != null ? payload : payload.question);
+            }}
             disabled={!input.trim()}
             className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
           >
@@ -104,10 +151,15 @@ export default function Query() {
             <p className="text-xs text-amber-600">
               {result.answer || "The knowledge graph does not contain enough structured context to answer this question."}
             </p>
+            {lastRequestMeta.maxAgeDays != null && (
+              <p className="text-xs text-amber-700">
+                Try widening the context window if this answer may depend on older company context.
+              </p>
+            )}
             {!isMock && (
               <p className="text-xs text-amber-700">
                 If you recently connected Slack, run a sync from{" "}
-                <a href="/connectors" className="underline underline-offset-2">
+                <a href="/app/connectors" className="underline underline-offset-2">
                   Connectors
                 </a>{" "}
                 and try again.
@@ -132,12 +184,24 @@ export default function Query() {
                 <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                   Live workspace context
                 </span>
+                {lastRequestMeta.maxAgeDays != null && (
+                  <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    Window: {formatWindowLabel(lastRequestMeta.maxAgeDays)}
+                  </span>
+                )}
                 <span>
-                  Grounded in {result.components?.length ?? 0} component{result.components?.length === 1 ? "" : "s"}
+                  Grounded in {components.length} component{components.length === 1 ? "" : "s"}
                   {" "}from {result.sources?.length ?? 0} source{result.sources?.length === 1 ? "" : "s"}.
                 </span>
               </div>
             )}
+            <TrustStatePanel
+              reviewStatus={result.reviewStatus ?? result.review_status}
+              reviewSummary={result.reviewSummary ?? result.review_summary}
+              temporalState={result.temporalState ?? result.temporal_state}
+              reviewItemId={result.reviewItemId ?? result.review_item_id}
+              className="mt-1"
+            />
             {result.answer ? (
               <div className="text-sm text-gray-800 leading-relaxed space-y-2">
                 {result.answer.split("\n").filter(Boolean).map((line, i) => (
@@ -186,39 +250,47 @@ export default function Query() {
           </div>
 
           {/* Cited components */}
-          {result.components?.length > 0 && (
+          {components.length > 0 && (
             <div className="bg-white border border-gray-200 rounded-xl p-5">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Cited Components
-              </h3>
-              <div className="divide-y divide-gray-100">
-                {result.components.map((c) => (
-                  <div key={c.id} className="py-2.5">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-sm font-medium text-gray-700">{c.name}</span>
-                        {c.model && (
-                          <span className="ml-2 text-xs text-gray-400">{c.model}</span>
-                        )}
-                      </div>
-                      <span className="text-sm font-semibold text-gray-900">{c.value}</span>
-                    </div>
-                    {(c.confidence != null || c.authority_source || c.last_verified_at) && (
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[11px] text-gray-400">
-                        {c.confidence != null && (
-                          <span>{Math.round(c.confidence * 100)}% confidence</span>
-                        )}
-                        {c.authority_source && (
-                          <span>via {c.authority_source}</span>
-                        )}
-                        {c.last_verified_at && (
-                          <span>verified {formatDate(c.last_verified_at)}</span>
-                        )}
-                      </div>
-                    )}
+              {currentComponents.length > 0 && (
+                <>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                    Cited Components
+                  </h3>
+                  <div className="divide-y divide-gray-100">
+                    {currentComponents.map((c) => (
+                      <ComponentEvidenceRow key={c.id} component={c} />
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              )}
+
+              {historicalComponents.length > 0 && (
+                <div className={currentComponents.length > 0 ? "mt-5 pt-5 border-t border-gray-100" : ""}>
+                  <div className="mb-3">
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      Historical Context
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-400">
+                      Older or superseded facts are separated here so they do not read like current truth.
+                    </p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {historicalComponents.map((c) => (
+                      <ComponentEvidenceRow key={c.id} component={c} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {(result.sourceDocuments ?? result.source_documents)?.length > 0 && (
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
+              <SourceDocumentLinks
+                items={result.sourceDocuments ?? result.source_documents}
+                label="Supporting documents"
+              />
             </div>
           )}
 
@@ -247,7 +319,15 @@ export default function Query() {
             {["What is our current MRR?", "How healthy are our customers?"].map((q) => (
               <button
                 key={q}
-                onClick={() => { setInput(q); mutation.mutate(q); }}
+                onClick={() => {
+                  setInput(q);
+                  const payload = buildQueryPayload(q, windowDays);
+                  setLastRequestMeta({
+                    question: q,
+                    maxAgeDays: payload.maxAgeDays ?? null,
+                  });
+                  mutation.mutate(payload.maxAgeDays != null ? payload : payload.question);
+                }}
                 className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
               >
                 {q}
@@ -258,6 +338,71 @@ export default function Query() {
       )}
     </div>
   );
+}
+
+function ComponentEvidenceRow({ component: c }) {
+  const provenanceQuery = useComponentSources(c.id, {
+    enabled: !!c.id && !((c.sourceDocuments ?? c.source_documents)?.length > 0),
+  });
+  const sourceDocuments =
+    (c.sourceDocuments ?? c.source_documents)?.length > 0
+      ? (c.sourceDocuments ?? c.source_documents)
+      : provenanceQuery.data ?? [];
+
+  return (
+    <div className="py-2.5">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-sm font-medium text-gray-700">{c.name}</span>
+          {c.model && (
+            <span className="ml-2 text-xs text-gray-400">{c.model}</span>
+          )}
+        </div>
+        <span className="text-sm font-semibold text-gray-900">{c.value}</span>
+      </div>
+      {(c.confidence != null || c.authority_source || c.last_verified_at) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[11px] text-gray-400">
+          {c.confidence != null && (
+            <span>{Math.round(c.confidence * 100)}% confidence</span>
+          )}
+          {c.authority_source && (
+            <span>via {c.authority_source}</span>
+          )}
+          {c.last_verified_at && (
+            <span>verified {formatDate(c.last_verified_at)}</span>
+          )}
+        </div>
+      )}
+      <TrustStatePanel
+        reviewStatus={c.reviewStatus ?? c.review_status}
+        reviewSummary={c.reviewSummary ?? c.review_summary}
+        temporalState={c.temporalState ?? c.temporal_state}
+        reviewItemId={c.reviewItemId ?? c.review_item_id}
+        compact
+        className="mt-2"
+      />
+      {sourceDocuments.length > 0 && (
+        <div className="mt-3">
+          <SourceDocumentLinks
+            items={sourceDocuments}
+            label="Evidence"
+            compact
+            showMeta
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isHistoricalComponent(component) {
+  const temporalState = normalizeValue(component?.temporalState ?? component?.temporal_state);
+  const reviewStatus = normalizeValue(component?.reviewStatus ?? component?.review_status);
+  return temporalState === "historical" || temporalState === "superseded" || reviewStatus === "superseded";
+}
+
+function normalizeValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
 }
 
 function SourceChip({ source }) {
@@ -307,4 +452,18 @@ function SearchIcon() {
       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
     </svg>
   );
+}
+
+function buildQueryPayload(question, windowDays) {
+  const trimmed = question.trim();
+  const days = windowDays === "all" ? null : Number(windowDays);
+  return {
+    question: trimmed,
+    maxAgeDays: Number.isFinite(days) ? days : null,
+  };
+}
+
+function formatWindowLabel(days) {
+  if (days == null) return "All time";
+  return `last ${days} day${days === 1 ? "" : "s"}`;
 }

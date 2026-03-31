@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  useConnectNotion,
+  useConnectorSyncJobs,
+  useConnectorSyncStatus,
   useConnectors,
+  useConnectorProcessingSummary,
   useDisconnectConnector,
   useSyncConnector,
   useWorkspaces,
@@ -42,13 +46,17 @@ function formatDocumentCount(count) {
 
 export default function Connectors() {
   const { data, isMock, ...query } = useConnectors();
+  const summaryQuery = useConnectorProcessingSummary();
   const workspaces = useWorkspaces();
   const { selectedId } = useWorkspaceSelection();
+  const connectNotionMut = useConnectNotion();
   const syncMut = useSyncConnector();
   const disconnectMut = useDisconnectConnector();
   const [actionError, setActionError] = useState(null);
   const [actionNotice, setActionNotice] = useState(null);
   const [oauthFlow, setOauthFlow] = useState(null);
+  const [notionFormOpen, setNotionFormOpen] = useState(false);
+  const [notionToken, setNotionToken] = useState("");
 
   const workspaceId = useMemo(
     () => resolveWorkspaceId(workspaces.data, selectedId),
@@ -57,6 +65,30 @@ export default function Connectors() {
 
   const list = data ?? [];
   const slackConnector = list.find((item) => item.type === "slack") ?? null;
+  const processingByType = useMemo(
+    () =>
+      new Map(
+        (summaryQuery.data?.items ?? []).map((item) => [item.connectorType, item]),
+      ),
+    [summaryQuery.data?.items],
+  );
+
+  const handleSyncJobSettled = async (connectorName, job) => {
+    await Promise.allSettled([query.refetch(), summaryQuery.refetch?.()]);
+
+    if (job?.status === "failed") {
+      setActionNotice(null);
+      setActionError(
+        job.errorMessage || `${connectorName} sync failed before the worker finished successfully.`,
+      );
+      return;
+    }
+
+    if (job?.status === "completed") {
+      setActionError(null);
+      setActionNotice(formatCompletedSyncNotice(connectorName, job.resultMetadata));
+    }
+  };
 
   useEffect(() => {
     if (!oauthFlow || isMock) return undefined;
@@ -171,8 +203,8 @@ export default function Connectors() {
             {isMock && <MockBadge />}
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            Slack is the Phase 2 reference connector. Notion, Drive, and Gong stay visible here so the
-            admin surface is stable while the backend expands.
+            Slack is the native reference connector, and Notion is the first OSS-backed path. Drive and
+            Gong stay visible here so the admin surface is stable while the backend expands.
           </p>
           {isMock && (
             <p className="text-xs text-amber-600 mt-2">
@@ -183,7 +215,7 @@ export default function Connectors() {
         </div>
         <div className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-right">
           <p className="text-[11px] uppercase tracking-wide text-gray-400">Phase</p>
-          <p className="text-sm font-medium text-gray-700">Slack first</p>
+          <p className="text-sm font-medium text-gray-700">Slack + Notion</p>
         </div>
       </div>
 
@@ -218,10 +250,17 @@ export default function Connectors() {
               isDemo={isMock}
               oauthPending={!!oauthFlow}
               workspaceId={workspaceId}
+              processing={processingByType.get(connector.type) ?? null}
+              notionFormOpen={connector.type === "notion" ? notionFormOpen : false}
+              notionToken={notionToken}
+              onChangeNotionToken={setNotionToken}
+              onToggleNotionForm={() => setNotionFormOpen((current) => !current)}
+              connectNotionMut={connectNotionMut}
               syncMut={syncMut}
               disconnectMut={disconnectMut}
               onActionError={setActionError}
               onActionNotice={setActionNotice}
+              onSyncJobSettled={handleSyncJobSettled}
               onStartOAuth={startSlackOAuth}
             />
           ))}
@@ -236,10 +275,17 @@ function ConnectorCard({
   isDemo,
   oauthPending,
   workspaceId,
+  processing,
+  notionFormOpen,
+  notionToken,
+  onChangeNotionToken,
+  onToggleNotionForm,
+  connectNotionMut,
   syncMut,
   disconnectMut,
   onActionError,
   onActionNotice,
+  onSyncJobSettled,
   onStartOAuth,
 }) {
   const {
@@ -256,11 +302,16 @@ function ConnectorCard({
     teamName,
     scope,
     syncQueuedAt,
+    syncMode,
+    processedCount,
+    totalProcessedCount,
     provider,
     providerLabel,
     providerNote,
   } = connector;
 
+  const isSlack = type === "slack";
+  const isNotion = type === "notion";
   const canConnect = !isDemo && !oauthPending && availability === "available" && status === "disconnected" && !!workspaceId;
   const canReconnect =
     !isDemo &&
@@ -273,13 +324,34 @@ function ConnectorCard({
   const installHref = workspaceId
     ? `/api/connectors/${type}/install?workspace_id=${workspaceId}`
     : null;
+  const processedDocuments = processing?.processedDocuments ?? totalProcessedCount;
+  const pendingDocuments = processing?.unprocessedDocuments ?? Math.max(Number(itemsSynced || 0) - processedDocuments, 0);
+  const syncStatusQuery = useConnectorSyncStatus(connectorId, {
+    enabled: !isDemo && !!connectorId,
+  });
+  const syncJobsQuery = useConnectorSyncJobs(connectorId, {
+    enabled: !isDemo && !!connectorId,
+  });
+  const latestSyncJob = syncStatusQuery.data;
+  const recentSyncJobs = syncJobsQuery.data ?? [];
+  const activeSyncStatus =
+    latestSyncJob?.status === "pending" || latestSyncJob?.status === "running"
+      ? latestSyncJob.status
+      : null;
+  const previousJobRef = useRef({ jobId: null, status: null });
 
   const handleSync = () => {
     onActionError(null);
     onActionNotice(null);
     syncMut.mutate(connectorId, {
       onError: (err) => onActionError(err?.message || `Failed to sync ${name}.`),
-      onSuccess: (result) => onActionNotice(result?.message || `${name} sync completed.`),
+      onSuccess: (result) =>
+        onActionNotice(
+          result?.message ||
+            (result?.job_id || result?.jobId
+              ? `${name} sync queued. Worker status will update below.`
+              : `${name} sync started.`),
+        ),
     });
   };
 
@@ -291,6 +363,46 @@ function ConnectorCard({
       onSuccess: () => onActionNotice(`${name} disconnected.`),
     });
   };
+
+  const handleNotionConnect = (event) => {
+    event.preventDefault();
+    onActionError(null);
+    onActionNotice(null);
+    connectNotionMut.mutate(
+      { token: notionToken },
+      {
+        onError: (err) => onActionError(formatActionError(err) || "Failed to connect Notion."),
+        onSuccess: () => {
+          onChangeNotionToken("");
+          onToggleNotionForm();
+          onActionNotice(
+            status === "disconnected"
+              ? "Notion connected. Run a sync to start storing workspace pages."
+              : "Notion token updated. Run another sync to refresh workspace pages.",
+          );
+        },
+      },
+    );
+  };
+
+  useEffect(() => {
+    const previous = previousJobRef.current;
+    const nextJobId = latestSyncJob?.jobId ?? null;
+    const nextStatus = latestSyncJob?.status ?? null;
+    const previousWasActive =
+      previous.status === "pending" || previous.status === "running";
+
+    if (
+      previous.jobId &&
+      previous.jobId === nextJobId &&
+      previousWasActive &&
+      (nextStatus === "completed" || nextStatus === "failed")
+    ) {
+      onSyncJobSettled(name, latestSyncJob);
+    }
+
+    previousJobRef.current = { jobId: nextJobId, status: nextStatus };
+  }, [latestSyncJob, name, onSyncJobSettled]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 flex flex-col gap-4 hover:shadow-sm transition-shadow">
@@ -327,6 +439,10 @@ function ConnectorCard({
           <span className="text-right text-gray-700">{lastSync}</span>
           <span>Items synced</span>
           <span className="text-right text-gray-700">{Number(itemsSynced || 0).toLocaleString()}</span>
+          <span>Processed</span>
+          <span className="text-right text-gray-700">{Number(processedDocuments || 0).toLocaleString()}</span>
+          <span>Pending</span>
+          <span className="text-right text-gray-700">{Number(pendingDocuments || 0).toLocaleString()}</span>
           {teamName && (
             <>
               <span>Workspace</span>
@@ -334,10 +450,98 @@ function ConnectorCard({
             </>
           )}
         </div>
+        {syncMode && (
+          <p className="text-[11px] text-gray-400 mt-2 capitalize">
+            Last sync mode: {syncMode}
+          </p>
+        )}
         {syncQueuedAt && (
           <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] text-blue-700">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500" />
             Sync queued {syncQueuedAt}
+          </div>
+        )}
+        {latestSyncJob && (
+          <div className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] uppercase tracking-wide text-gray-400">Latest job</p>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  latestSyncJob.status === "completed"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : latestSyncJob.status === "failed"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-blue-100 text-blue-700"
+                }`}
+              >
+                {latestSyncJob.status}
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] text-gray-500">
+              Created {formatDateTime(latestSyncJob.createdAt)}
+              {latestSyncJob.startedAt ? ` · Started ${formatDateTime(latestSyncJob.startedAt)}` : ""}
+              {latestSyncJob.completedAt ? ` · Finished ${formatDateTime(latestSyncJob.completedAt)}` : ""}
+            </p>
+            {latestSyncJob.status === "completed" && (
+              <p className="mt-2 text-[11px] text-emerald-700">
+                {formatCompletedSyncNotice(name, latestSyncJob.resultMetadata)}
+              </p>
+            )}
+            {latestSyncJob.status === "failed" && (
+              <p className="mt-2 text-[11px] text-red-600">
+                {latestSyncJob.errorType ? `${latestSyncJob.errorType}: ` : ""}
+                {latestSyncJob.errorMessage || "Sync failed."}
+              </p>
+            )}
+            {activeSyncStatus && (
+              <p className="mt-2 text-[11px] text-blue-700">
+                Worker is {activeSyncStatus === "running" ? "running" : "queued"} for this connector.
+              </p>
+            )}
+          </div>
+        )}
+        {recentSyncJobs.length > 1 && (
+          <div className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] uppercase tracking-wide text-gray-400">Recent runs</p>
+              {connectorId && (
+                <Link
+                  to={`/app/connectors/${type}/runs`}
+                  className="text-[11px] font-medium text-brand-700 hover:text-brand-800"
+                >
+                  View all runs
+                </Link>
+              )}
+            </div>
+            <div className="mt-2 space-y-2">
+              {recentSyncJobs.slice(0, 4).map((job) => (
+                <div key={job.jobId ?? `${job.status}-${job.createdAt}`} className="flex items-start justify-between gap-3 text-[11px]">
+                  <div className="min-w-0">
+                    <p className="text-gray-700">
+                      {job.status === "completed"
+                        ? summarizeSyncJob(job.resultMetadata)
+                        : job.status === "failed"
+                          ? job.errorMessage || "Sync failed."
+                          : `Job ${job.status}`}
+                    </p>
+                    <p className="mt-0.5 text-gray-400">
+                      {job.createdAt ? formatDateTime(job.createdAt) : "Unknown start time"}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      job.status === "completed"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : job.status === "failed"
+                          ? "bg-red-100 text-red-700"
+                          : "bg-blue-100 text-blue-700"
+                    }`}
+                  >
+                    {job.status}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {message && (
@@ -353,14 +557,24 @@ function ConnectorCard({
             Slack scopes: {scope}
           </p>
         )}
-        {status === "disconnected" && availability === "available" && (
+        {isSlack && status === "disconnected" && availability === "available" && (
           <p className="text-[11px] text-gray-500 mt-2">
             Connect Slack to start ingesting messages, threads, and source-backed pricing or roadmap facts.
           </p>
         )}
-        {status === "error" && (
+        {isNotion && status === "disconnected" && availability === "available" && (
+          <p className="text-[11px] text-gray-500 mt-2">
+            Add a Notion integration token, then sync pages into stored source documents for extraction and query.
+          </p>
+        )}
+        {isSlack && status === "error" && (
           <p className="text-[11px] text-red-600 mt-2">
             Slack needs attention. Reconnect the workspace or retry sync after checking OAuth and connector health.
+          </p>
+        )}
+        {isNotion && status === "error" && (
+          <p className="text-[11px] text-red-600 mt-2">
+            Notion needs attention. Update the integration token, then run another sync.
           </p>
         )}
         {status === "connected" && teamName && (
@@ -373,7 +587,7 @@ function ConnectorCard({
             <p className="text-[11px] text-emerald-700">
               {formatDocumentCount(itemsSynced)} available for extraction and query.
             </p>
-            <Link to="/sources" className="inline-flex mt-1 text-[11px] font-medium text-emerald-700 underline">
+            <Link to="/app/sources" className="inline-flex mt-1 text-[11px] font-medium text-emerald-700 underline">
               Inspect stored documents
             </Link>
           </div>
@@ -383,12 +597,55 @@ function ConnectorCard({
             OAuth is complete. Run a sync to start storing Slack history in the database.
           </p>
         )}
+        {isNotion && status === "connected" && itemsSynced === 0 && !syncQueuedAt && (
+          <p className="text-[11px] text-gray-500 mt-2">
+            Notion is connected. Run a sync to store workspace pages and surface them in Sources and Query.
+          </p>
+        )}
         {status === "coming_soon" && (
           <p className="text-[11px] text-gray-500 mt-2">
             Backend support for this connector is intentionally deferred until the Slack path is stable.
           </p>
         )}
       </div>
+
+      {isNotion && notionFormOpen && (
+        <form onSubmit={handleNotionConnect} className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+          <div>
+            <label htmlFor="notion-token" className="block text-xs font-medium text-gray-600 mb-1">
+              Notion integration token
+            </label>
+            <input
+              id="notion-token"
+              type="password"
+              value={notionToken}
+              onChange={(event) => onChangeNotionToken(event.target.value)}
+              placeholder="secret_xxx"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={connectNotionMut.isPending || !notionToken.trim()}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {connectNotionMut.isPending
+                ? "Saving..."
+                : status === "connected" || status === "error"
+                  ? "Save Notion token"
+                  : "Save Notion token"}
+            </button>
+            <button
+              type="button"
+              onClick={onToggleNotionForm}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
 
       <div className="flex flex-wrap gap-2 mt-auto">
         {status === "coming_soon" ? (
@@ -399,7 +656,7 @@ function ConnectorCard({
           >
             Coming soon
           </button>
-        ) : canConnect ? (
+        ) : isSlack && canConnect ? (
           <a
             href={installHref}
             onClick={(event) => {
@@ -410,7 +667,7 @@ function ConnectorCard({
           >
             Connect Slack
           </a>
-        ) : canReconnect ? (
+        ) : isSlack && canReconnect ? (
           <a
             href={installHref}
             onClick={(event) => {
@@ -421,13 +678,31 @@ function ConnectorCard({
           >
             Reconnect Slack
           </a>
+        ) : isNotion && status === "disconnected" ? (
+          <button
+            type="button"
+            disabled={isDemo || !workspaceId}
+            onClick={onToggleNotionForm}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            Connect Notion
+          </button>
+        ) : isNotion && (status === "connected" || status === "error") ? (
+          <button
+            type="button"
+            disabled={isDemo}
+            onClick={onToggleNotionForm}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+          >
+            Update Notion token
+          </button>
         ) : (
           <button
             type="button"
             disabled
             className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-400 cursor-not-allowed"
           >
-            {isDemo
+          {isDemo
               ? "Demo mode"
               : oauthPending
                 ? "Waiting for Slack..."
@@ -439,11 +714,17 @@ function ConnectorCard({
 
         <button
           type="button"
-          disabled={!canSync || syncMut.isPending}
+          disabled={!canSync || syncMut.isPending || !!activeSyncStatus}
           onClick={handleSync}
           className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
         >
-          {syncMut.isPending && syncMut.variables === connectorId ? "Syncing..." : "Sync now"}
+          {activeSyncStatus === "running"
+            ? "Running..."
+            : activeSyncStatus === "pending"
+              ? "Queued..."
+              : syncMut.isPending && syncMut.variables === connectorId
+                ? "Starting..."
+                : "Sync now"}
         </button>
 
         <button
@@ -459,6 +740,46 @@ function ConnectorCard({
       </div>
     </div>
   );
+}
+
+function formatCompletedSyncNotice(connectorName, metadata) {
+  if (!metadata || typeof metadata !== "object") {
+    return `${connectorName} sync completed.`;
+  }
+
+  const fetched = Number(metadata.documents_fetched ?? 0);
+  const persisted = Number(metadata.documents_persisted ?? 0);
+  const processed = Number(metadata.documents_processed ?? 0);
+  const syncMode = metadata.sync_mode ? ` (${metadata.sync_mode})` : "";
+
+  return `${connectorName} sync completed: fetched ${fetched}, stored ${persisted}, processed ${processed}${syncMode}.`;
+}
+
+function summarizeSyncJob(metadata) {
+  if (!metadata || typeof metadata !== "object") {
+    return "Sync completed.";
+  }
+  const fetched = Number(metadata.documents_fetched ?? 0);
+  const persisted = Number(metadata.documents_persisted ?? 0);
+  const processed = Number(metadata.documents_processed ?? 0);
+  return `Fetched ${fetched}, stored ${persisted}, processed ${processed}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function formatActionError(error) {
+  if (!error) return null;
+  if (Array.isArray(error.detail)) {
+    return error.detail.map((item) => item.msg).join(". ");
+  }
+  return error.message || null;
 }
 
 function SlackSummaryBanner({ connector, isDemo, oauthPending, workspaceId, onStartOAuth }) {
@@ -481,7 +802,7 @@ function SlackSummaryBanner({ connector, isDemo, oauthPending, workspaceId, onSt
                 : `Last completed sync: ${connector.lastSync}. Run a sync to store Slack history.`}
           </p>
           {connector.itemsSynced > 0 && (
-            <Link to="/sources" className="inline-flex mt-3 text-xs font-medium text-emerald-800 underline">
+            <Link to="/app/sources" className="inline-flex mt-3 text-xs font-medium text-emerald-800 underline">
               Inspect stored documents
             </Link>
           )}

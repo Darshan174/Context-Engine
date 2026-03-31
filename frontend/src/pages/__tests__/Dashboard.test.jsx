@@ -3,10 +3,18 @@ import { MemoryRouter } from "react-router-dom";
 import Dashboard from "../Dashboard";
 
 vi.mock("../../api/hooks", () => ({
+  useConnectorProcessingSummary: vi.fn(),
+  useConnectors: vi.fn(),
   useDashboard: vi.fn(),
+  useReviewQueue: vi.fn(),
 }));
 
-import { useDashboard } from "../../api/hooks";
+import {
+  useConnectorProcessingSummary,
+  useConnectors,
+  useDashboard,
+  useReviewQueue,
+} from "../../api/hooks";
 
 function renderDashboard() {
   return render(
@@ -18,6 +26,23 @@ function renderDashboard() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useConnectors.mockReturnValue({
+    isLoading: false,
+    isError: false,
+    isMock: false,
+    data: [],
+    refetch: vi.fn(),
+  });
+  useConnectorProcessingSummary.mockReturnValue({
+    data: { items: [] },
+    refetch: vi.fn(),
+  });
+  useReviewQueue.mockReturnValue({
+    isLoading: false,
+    isError: false,
+    data: [],
+    refetch: vi.fn(),
+  });
 });
 
 describe("Dashboard", () => {
@@ -55,9 +80,124 @@ describe("Dashboard", () => {
     expect(screen.getByText("15")).toBeInTheDocument();
     expect(screen.getByText("Live source data is available")).toBeInTheDocument();
     expect(screen.getByText(/stored and ready for extraction and query/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Inspect source documents" })).toHaveAttribute("href", "/sources");
-    expect(screen.getByRole("link", { name: /Sources/ })).toHaveAttribute("href", "/sources");
+    expect(screen.getByRole("link", { name: "Inspect source documents" })).toHaveAttribute("href", "/app/sources");
+    expect(screen.getByRole("link", { name: /Sources/ })).toHaveAttribute("href", "/app/sources");
     expect(screen.queryByText("Your workspace is empty")).not.toBeInTheDocument();
+  });
+
+  it("renders trust status counts and review queue link", () => {
+    useDashboard.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        stats: [{ label: "Models", value: 1, delta: "—" }],
+        activity: [],
+        alerts: [],
+      },
+      refetch: vi.fn(),
+    });
+    useReviewQueue.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: [
+        { id: "r1", status: "needs_review", kind: "conflict" },
+        { id: "r2", status: "needs_review", kind: "low_confidence" },
+        { id: "r3", status: "superseded", kind: "superseded_fact" },
+      ],
+      refetch: vi.fn(),
+    });
+
+    renderDashboard();
+
+    expect(screen.getByText("Trust Status")).toBeInTheDocument();
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    expect(screen.getByText("Conflicts")).toBeInTheDocument();
+    expect(screen.getByText("Historical facts")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open review queue" })).toHaveAttribute("href", "/app/review");
+    expect(screen.getByRole("link", { name: /Needs review/ })).toHaveAttribute("href", "/app/review?status=needs_review");
+    expect(screen.getByRole("link", { name: /Conflicts/ })).toHaveAttribute("href", "/app/review?kind=conflict");
+    expect(screen.getByRole("link", { name: /Historical facts/ })).toHaveAttribute("href", "/app/review?status=superseded");
+    expect(screen.getByText(/Review attention is needed/)).toBeInTheDocument();
+  });
+
+  it("renders pipeline status cards and run-history links", () => {
+    useDashboard.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        stats: [{ label: "Sources", value: 12, delta: "2 connectors active" }],
+        activity: [],
+        alerts: [],
+      },
+      refetch: vi.fn(),
+    });
+    useConnectors.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      isMock: false,
+      data: [
+        {
+          type: "slack",
+          connectorId: "conn_slack",
+          name: "Slack",
+          description: "Channels",
+          status: "connected",
+          lastSync: "Mar 31, 2026, 9:05 AM",
+          itemsSynced: 10,
+          providerLabel: "Built in",
+          availability: "available",
+        },
+        {
+          type: "notion",
+          connectorId: "conn_notion",
+          name: "Notion",
+          description: "Docs",
+          status: "error",
+          lastSync: "Never",
+          itemsSynced: 2,
+          providerLabel: "dlt",
+          syncQueuedAt: "Mar 31, 2026, 10:00 AM",
+          availability: "available",
+        },
+      ],
+      refetch: vi.fn(),
+    });
+    useConnectorProcessingSummary.mockReturnValue({
+      data: {
+        items: [
+          {
+            connectorType: "slack",
+            processedDocuments: 8,
+            unprocessedDocuments: 2,
+            totalDocuments: 10,
+          },
+          {
+            connectorType: "notion",
+            processedDocuments: 1,
+            unprocessedDocuments: 1,
+            totalDocuments: 2,
+          },
+        ],
+      },
+      refetch: vi.fn(),
+    });
+
+    renderDashboard();
+
+    expect(screen.getByText("Pipeline Status")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open connectors" })).toHaveAttribute("href", "/app/connectors");
+    expect(screen.getByRole("link", { name: /Queued syncs/ })).toHaveAttribute("href", "/app/connectors");
+    expect(screen.getByRole("link", { name: /Connector errors/ })).toHaveAttribute("href", "/app/connectors");
+    expect(screen.getByRole("link", { name: /Pending extraction/ })).toHaveAttribute("href", "/app/sources?processed=unprocessed");
+    expect(screen.getByText("Slack")).toBeInTheDocument();
+    expect(screen.getByText("Notion")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Run history" })[0]).toHaveAttribute(
+      "href",
+      "/app/connectors/slack/runs",
+    );
+    expect(screen.getByText(/Extraction is still pending for 2 source documents/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sync queued Mar 31, 2026, 10:00 AM/i)).toBeInTheDocument();
+    expect(screen.getByText(/needs attention before new source data can be trusted/i)).toBeInTheDocument();
   });
 
   it("shows onboarding hint when all stats are zero", () => {
@@ -79,7 +219,7 @@ describe("Dashboard", () => {
 
     renderDashboard();
     expect(screen.getByText("Your workspace is empty")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Models" })).toHaveAttribute("href", "/models");
+    expect(screen.getByRole("link", { name: "Models" })).toHaveAttribute("href", "/app/models");
   });
 
   it("degrades gracefully when activity and alerts are missing", () => {

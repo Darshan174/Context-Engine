@@ -1,11 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import Connectors from "../Connectors";
 
 vi.mock("../../api/hooks", () => ({
+  useConnectNotion: vi.fn(),
+  useConnectorSyncJobs: vi.fn(),
+  useConnectorSyncStatus: vi.fn(),
   useConnectors: vi.fn(),
+  useConnectorProcessingSummary: vi.fn(),
   useSyncConnector: vi.fn(),
   useDisconnectConnector: vi.fn(),
   useWorkspaces: vi.fn(),
@@ -17,7 +21,11 @@ vi.mock("../../context/WorkspaceContext", () => ({
 }));
 
 import {
+  useConnectNotion,
+  useConnectorSyncJobs,
+  useConnectorSyncStatus,
   useConnectors,
+  useConnectorProcessingSummary,
   useDisconnectConnector,
   useSyncConnector,
   useWorkspaces,
@@ -31,6 +39,12 @@ const syncMut = {
 };
 
 const disconnectMut = {
+  mutate: vi.fn(),
+  isPending: false,
+  variables: undefined,
+};
+
+const connectNotionMut = {
   mutate: vi.fn(),
   isPending: false,
   variables: undefined,
@@ -61,8 +75,36 @@ beforeEach(() => {
   vi.clearAllMocks();
   syncMut.mutate.mockReset();
   disconnectMut.mutate.mockReset();
+  connectNotionMut.mutate.mockReset();
+  useConnectNotion.mockReturnValue(connectNotionMut);
+  useConnectorSyncJobs.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
+  useConnectorSyncStatus.mockReturnValue({
+    data: null,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
   useSyncConnector.mockReturnValue(syncMut);
   useDisconnectConnector.mockReturnValue(disconnectMut);
+  useConnectorProcessingSummary.mockReturnValue({
+    data: {
+      items: [
+        {
+          connectorType: "slack",
+          status: "connected",
+          totalDocuments: 42,
+          processedDocuments: 30,
+          unprocessedDocuments: 12,
+          lastSyncAt: "Mar 29, 2026, 9:30 AM",
+        },
+      ],
+    },
+  });
   useWorkspaces.mockReturnValue({ data: [{ id: "ws_1", name: "Workspace" }] });
   useWorkspaceSelection.mockReturnValue({ selectedId: "ws_1" });
   resolveWorkspaceId.mockReturnValue("ws_1");
@@ -111,11 +153,11 @@ describe("Connectors", () => {
           connectorId: null,
           name: "Notion",
           description: "Docs",
-          status: "coming_soon",
+          status: "disconnected",
           lastSync: "Never",
           itemsSynced: 0,
           color: "#111111",
-          availability: "coming_soon",
+          availability: "available",
         },
       ],
       isMock: true,
@@ -126,7 +168,7 @@ describe("Connectors", () => {
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
     expect(screen.getByText(/OAuth and sync actions unlock once the backend endpoints are live/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Demo mode" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Coming soon" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Connect Notion" })).toBeDisabled();
   });
 
   it("renders Slack connect link for a real disconnected connector", () => {
@@ -263,7 +305,7 @@ describe("Connectors", () => {
     expect(screen.getByText("42 source documents available for extraction and query.")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Inspect stored documents" })[0]).toHaveAttribute(
       "href",
-      "/sources",
+      "/app/sources",
     );
     expect(screen.getByRole("link", { name: "Refresh OAuth" })).toHaveAttribute(
       "href",
@@ -295,6 +337,144 @@ describe("Connectors", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
     expect(screen.getByText("Synced 12 documents")).toBeInTheDocument();
+  });
+
+  it("shows queued sync status and disables sync while a job is active", () => {
+    useConnectorSyncStatus.mockReturnValue({
+      data: {
+        jobId: "job_1",
+        status: "running",
+        createdAt: "2026-03-31T08:00:00Z",
+        startedAt: "2026-03-31T08:01:00Z",
+        completedAt: null,
+        errorType: null,
+        errorMessage: null,
+        resultMetadata: {},
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "slack",
+          connectorId: "conn_1",
+          name: "Slack",
+          description: "Channels",
+          status: "connected",
+          lastSync: "just now",
+          itemsSynced: 12,
+          color: "#4A154B",
+          availability: "available",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    expect(screen.getByText("Latest job")).toBeInTheDocument();
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.getByText(/Worker is running for this connector/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
+  });
+
+  it("renders completed sync job metadata", () => {
+    useConnectorSyncStatus.mockReturnValue({
+      data: {
+        jobId: "job_2",
+        status: "completed",
+        createdAt: "2026-03-31T08:00:00Z",
+        startedAt: "2026-03-31T08:01:00Z",
+        completedAt: "2026-03-31T08:02:00Z",
+        errorType: null,
+        errorMessage: null,
+        resultMetadata: {
+          documents_fetched: 18,
+          documents_persisted: 10,
+          documents_processed: 7,
+          sync_mode: "incremental",
+        },
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "notion",
+          connectorId: "conn_notion",
+          name: "Notion",
+          description: "Docs",
+          status: "connected",
+          lastSync: "Mar 31, 2026, 8:02 AM",
+          itemsSynced: 18,
+          color: "#111111",
+          availability: "available",
+          provider: "dlt",
+          providerLabel: "dlt",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    expect(
+      screen.getByText("Notion sync completed: fetched 18, stored 10, processed 7 (incremental)."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders recent sync history when multiple jobs exist", () => {
+    useConnectorSyncJobs.mockReturnValue({
+      data: [
+        {
+          jobId: "job_3",
+          status: "completed",
+          createdAt: "2026-03-31T09:00:00Z",
+          resultMetadata: {
+            documents_fetched: 18,
+            documents_persisted: 10,
+            documents_processed: 7,
+          },
+        },
+        {
+          jobId: "job_2",
+          status: "failed",
+          createdAt: "2026-03-31T08:00:00Z",
+          errorMessage: "Slack API returned HTTP 429",
+          resultMetadata: {},
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "slack",
+          connectorId: "conn_1",
+          name: "Slack",
+          description: "Channels",
+          status: "connected",
+          lastSync: "Mar 31, 2026, 9:05 AM",
+          itemsSynced: 18,
+          color: "#4A154B",
+          availability: "available",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    expect(screen.getByText("Recent runs")).toBeInTheDocument();
+    expect(screen.getByText("Fetched 18, stored 10, processed 7")).toBeInTheDocument();
+    expect(screen.getByText("Slack API returned HTTP 429")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View all runs" })).toHaveAttribute(
+      "href",
+      "/app/connectors/slack/runs",
+    );
   });
 
   it("shows reconnect guidance for error state", () => {
@@ -331,21 +511,6 @@ describe("Connectors", () => {
     mockConnectorsQuery({
       data: [
         {
-          type: "notion",
-          connectorId: null,
-          name: "Notion",
-          description: "Docs",
-          status: "coming_soon",
-          lastSync: "Never",
-          itemsSynced: 0,
-          color: "#111111",
-          availability: "coming_soon",
-          provider: "dlt",
-          providerLabel: "dlt",
-          providerNote:
-            "Planned to use a dlt verified source instead of hand-building the full Notion sync stack.",
-        },
-        {
           type: "gdrive",
           connectorId: null,
           name: "Google Drive",
@@ -365,10 +530,85 @@ describe("Connectors", () => {
 
     renderConnectors();
 
-    expect(screen.getByText("dlt")).toBeInTheDocument();
     expect(screen.getByText("Unstructured")).toBeInTheDocument();
-    expect(screen.getByText(/dlt verified source/)).toBeInTheDocument();
     expect(screen.getByText(/Unstructured for Drive ingestion/)).toBeInTheDocument();
+  });
+
+  it("opens a Notion token form for a disconnected connector and submits it", async () => {
+    connectNotionMut.mutate.mockImplementation((_body, opts) => opts.onSuccess?.());
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "notion",
+          connectorId: null,
+          name: "Notion",
+          description: "Docs",
+          status: "disconnected",
+          lastSync: "Never",
+          itemsSynced: 0,
+          color: "#111111",
+          availability: "available",
+          provider: "dlt",
+          providerLabel: "dlt",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    await userEvent.click(screen.getByRole("button", { name: "Connect Notion" }));
+    await userEvent.type(screen.getByLabelText("Notion integration token"), "secret_test_token");
+    await userEvent.click(screen.getByRole("button", { name: "Save Notion token" }));
+
+    await waitFor(() => {
+      expect(connectNotionMut.mutate).toHaveBeenCalledWith(
+        { token: "secret_test_token" },
+        expect.any(Object),
+      );
+    });
+    expect(screen.getByText("Notion connected. Run a sync to start storing workspace pages.")).toBeInTheDocument();
+  });
+
+  it("renders connector processing counts from the summary endpoint", () => {
+    useConnectorProcessingSummary.mockReturnValue({
+      data: {
+        items: [
+          {
+            connectorType: "notion",
+            status: "connected",
+            totalDocuments: 18,
+            processedDocuments: 12,
+            unprocessedDocuments: 6,
+            lastSyncAt: "Mar 30, 2026, 10:00 AM",
+          },
+        ],
+      },
+    });
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "notion",
+          connectorId: "conn_notion",
+          name: "Notion",
+          description: "Docs",
+          status: "connected",
+          lastSync: "Mar 30, 2026, 10:00 AM",
+          itemsSynced: 18,
+          color: "#111111",
+          availability: "available",
+          provider: "dlt",
+          providerLabel: "dlt",
+          syncMode: "incremental",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    const card = screen.getByText("Notion").closest("div.rounded-xl");
+    expect(within(card).getByText("12")).toBeInTheDocument();
+    expect(within(card).getByText("6")).toBeInTheDocument();
+    expect(within(card).getByText(/Last sync mode: incremental/)).toBeInTheDocument();
   });
 
   it("opens Slack OAuth in a popup and shows pending guidance", async () => {

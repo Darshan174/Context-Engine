@@ -120,14 +120,14 @@ describe("WorkspaceSwitcher", () => {
     });
 
     renderSwitcher({
-      initialEntries: ["/model/abc-123"],
+      initialEntries: ["/app/model/abc-123"],
       extra: <LocationDisplay />,
     });
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/model/abc-123");
+    expect(screen.getByTestId("location")).toHaveTextContent("/app/model/abc-123");
 
     await userEvent.selectOptions(screen.getByRole("combobox"), "ws-2");
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/models");
+    expect(screen.getByTestId("location")).toHaveTextContent("/app/models");
   });
 });

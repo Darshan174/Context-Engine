@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useComponentSources } from "../api/hooks";
+import SourceDocumentLinks from "./SourceDocumentLinks";
+import TrustStatePanel from "./TrustStatePanel";
 
 /**
  * Renders a single component card with optional inline edit and delete.
@@ -16,7 +19,12 @@ export default function ComponentCard({
   freshness,
   last_verified_at,
   sources,
+  sourceDocuments,
   authority_source,
+  reviewStatus,
+  reviewSummary,
+  temporalState,
+  reviewItemId,
   onUpdate,
   onDelete,
   updatePending,
@@ -32,9 +40,14 @@ export default function ComponentCard({
   const confidencePct = Math.round(confidence * 100);
   const barColor =
     confidencePct >= 90 ? "bg-emerald-500" : confidencePct >= 75 ? "bg-amber-400" : "bg-red-400";
+  const provenanceQuery = useComponentSources(id, {
+    enabled: !!id && (!sourceDocuments || sourceDocuments.length === 0),
+  });
 
   const displayFreshness = freshness ?? formatVerifiedAt(last_verified_at);
   const displaySources = sources ?? (authority_source ? [authority_source] : []);
+  const displaySourceDocuments =
+    sourceDocuments?.length > 0 ? sourceDocuments : provenanceQuery.data ?? [];
 
   const canMutate = !!onUpdate; // if callbacks provided, this is a real backend component
 
@@ -178,6 +191,15 @@ export default function ComponentCard({
         <p className="text-xs text-gray-400 mb-3">Updated {displayFreshness}</p>
       )}
 
+      <TrustStatePanel
+        reviewStatus={reviewStatus}
+        reviewSummary={reviewSummary}
+        temporalState={temporalState}
+        reviewItemId={reviewItemId}
+        compact
+        className="mb-3"
+      />
+
       {/* Source chips */}
       {displaySources.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-3">
@@ -189,6 +211,12 @@ export default function ComponentCard({
               {s}
             </span>
           ))}
+        </div>
+      )}
+
+      {displaySourceDocuments.length > 0 && (
+        <div className="mb-3">
+          <SourceDocumentLinks items={displaySourceDocuments} label="Evidence" compact showMeta />
         </div>
       )}
 

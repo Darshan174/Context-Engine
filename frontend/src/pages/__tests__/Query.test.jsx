@@ -1,12 +1,14 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import Query from "../Query";
 
 vi.mock("../../api/hooks", () => ({
+  useComponentSources: vi.fn(),
   useContextQuery: vi.fn(),
 }));
 
-import { useContextQuery } from "../../api/hooks";
+import { useComponentSources, useContextQuery } from "../../api/hooks";
 
 const noopMut = {
   mutate: vi.fn(),
@@ -19,11 +21,20 @@ const noopMut = {
 beforeEach(() => {
   vi.clearAllMocks();
   useContextQuery.mockReturnValue(noopMut);
+  useComponentSources.mockReturnValue({ data: [], isLoading: false, isError: false });
 });
+
+function renderQuery() {
+  return render(
+    <MemoryRouter>
+      <Query />
+    </MemoryRouter>,
+  );
+}
 
 describe("Query — empty state", () => {
   it("renders hint text and suggested question chips", () => {
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Ask a question to query your knowledge graph.")).toBeInTheDocument();
     expect(screen.getByText("What is our current MRR?")).toBeInTheDocument();
@@ -31,7 +42,7 @@ describe("Query — empty state", () => {
   });
 
   it("has Ask button disabled when input is blank", () => {
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Ask")).toBeDisabled();
   });
@@ -42,7 +53,7 @@ describe("Query — submit flow", () => {
     const mutate = vi.fn();
     useContextQuery.mockReturnValue({ ...noopMut, mutate });
 
-    render(<Query />);
+    renderQuery();
 
     await userEvent.type(
       screen.getByPlaceholderText("Ask a question about your company data..."),
@@ -57,17 +68,36 @@ describe("Query — submit flow", () => {
     const mutate = vi.fn();
     useContextQuery.mockReturnValue({ ...noopMut, mutate });
 
-    render(<Query />);
+    renderQuery();
 
     await userEvent.click(screen.getByText("What is our current MRR?"));
 
     expect(mutate).toHaveBeenCalledWith("What is our current MRR?");
   });
 
+  it("passes a temporal window when a recent context filter is selected", async () => {
+    const mutate = vi.fn();
+    useContextQuery.mockReturnValue({ ...noopMut, mutate });
+
+    renderQuery();
+
+    await userEvent.selectOptions(screen.getByLabelText("Context window"), "7");
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question about your company data..."),
+      "What changed in pricing?",
+    );
+    await userEvent.click(screen.getByText("Ask"));
+
+    expect(mutate).toHaveBeenCalledWith({
+      question: "What changed in pricing?",
+      maxAgeDays: 7,
+    });
+  });
+
   it("shows pending state", () => {
     useContextQuery.mockReturnValue({ ...noopMut, isPending: true });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Querying knowledge graph...")).toBeInTheDocument();
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
@@ -90,7 +120,7 @@ describe("Query — mock response", () => {
   it("shows answer and MockBadge for mock response", () => {
     useContextQuery.mockReturnValue({ ...noopMut, data: mockResult });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Current MRR is $2.4M.")).toBeInTheDocument();
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
@@ -99,7 +129,7 @@ describe("Query — mock response", () => {
   it("renders cited components", () => {
     useContextQuery.mockReturnValue({ ...noopMut, data: mockResult });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Cited Components")).toBeInTheDocument();
     expect(screen.getByText("MRR")).toBeInTheDocument();
@@ -110,7 +140,7 @@ describe("Query — mock response", () => {
   it("renders source chips", () => {
     useContextQuery.mockReturnValue({ ...noopMut, data: mockResult });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Sources")).toBeInTheDocument();
     expect(screen.getByText("Stripe")).toBeInTheDocument();
@@ -130,7 +160,7 @@ describe("Query — real response", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: realResult });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("MRR is $3.1M as of this month.")).toBeInTheDocument();
     expect(screen.queryByText(/Demo data/)).not.toBeInTheDocument();
@@ -150,7 +180,7 @@ describe("Query — object sources", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Slack")).toBeInTheDocument();
     expect(screen.getByText(/alice/)).toBeInTheDocument();
@@ -170,7 +200,7 @@ describe("Query — object sources", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("CSV export")).toBeInTheDocument();
     expect(screen.getByText("Gong")).toBeInTheDocument();
@@ -190,7 +220,7 @@ describe("Query — freshness badge", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("2 min ago")).toBeInTheDocument();
   });
@@ -205,7 +235,7 @@ describe("Query — freshness badge", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("just now")).toBeInTheDocument();
     // No freshness badge rendered
@@ -224,7 +254,7 @@ describe("Query — semantic freshness", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     const badge = screen.getByText("Current");
     expect(badge).toBeInTheDocument();
@@ -241,7 +271,7 @@ describe("Query — semantic freshness", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     const badge = screen.getByText("Possibly stale");
     expect(badge).toBeInTheDocument();
@@ -258,7 +288,7 @@ describe("Query — semantic freshness", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     const badge = screen.getByText("Stale");
     expect(badge).toBeInTheDocument();
@@ -276,7 +306,7 @@ describe("Query — empty answer (non-zero confidence)", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("No answer could be determined for this query.")).toBeInTheDocument();
   });
@@ -290,7 +320,7 @@ describe("Query — empty answer (non-zero confidence)", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("No answer could be determined for this query.")).toBeInTheDocument();
   });
@@ -307,11 +337,11 @@ describe("Query — no-match response", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("No grounded answer found")).toBeInTheDocument();
     expect(screen.getByText(/could not find matching/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connectors" })).toHaveAttribute("href", "/connectors");
+    expect(screen.getByRole("link", { name: "Connectors" })).toHaveAttribute("href", "/app/connectors");
     // Should NOT render like a normal answer card
     expect(screen.queryByText("Confidence")).not.toBeInTheDocument();
     expect(screen.queryByText("Cited Components")).not.toBeInTheDocument();
@@ -327,10 +357,32 @@ describe("Query — no-match response", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("No grounded answer found")).toBeInTheDocument();
     expect(screen.getByText(/does not contain enough structured context/)).toBeInTheDocument();
+  });
+
+  it("suggests widening the context window when a recent filter returns no match", async () => {
+    const result = {
+      question: "Unknown thing?",
+      answer: "",
+      confidence: 0,
+      components: [],
+      sources: [],
+    };
+    useContextQuery.mockReturnValue({ ...noopMut, data: result, mutate: vi.fn() });
+
+    renderQuery();
+
+    await userEvent.selectOptions(screen.getByLabelText("Context window"), "7");
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question about your company data..."),
+      "Unknown thing?",
+    );
+    await userEvent.click(screen.getByText("Ask"));
+
+    expect(screen.getByText(/Try widening the context window/i)).toBeInTheDocument();
   });
 });
 
@@ -352,7 +404,7 @@ describe("Query — real backend success response", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     // Answer text
     expect(screen.getByText("Current MRR is $3.1M based on Stripe data.")).toBeInTheDocument();
@@ -372,13 +424,35 @@ describe("Query — real backend success response", () => {
     // Component metadata
     expect(screen.getByText("95% confidence")).toBeInTheDocument();
     expect(screen.getByText("via stripe")).toBeInTheDocument();
-    expect(screen.getByText(/verified/)).toBeInTheDocument();
+    expect(screen.getByText(/^verified /)).toBeInTheDocument();
     // Sources
     expect(screen.getByText("Sources")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Stripe" })).toHaveAttribute("href", "https://dashboard.stripe.com");
     expect(screen.getByText("Internal DB")).toBeInTheDocument();
     // No mock badge
     expect(screen.queryByText(/Demo data/)).not.toBeInTheDocument();
+  });
+
+  it("shows the selected context window on live backend answers", async () => {
+    const result = {
+      question: "What changed in pricing?",
+      answer: "Pricing changed this week.",
+      confidence: 0.84,
+      components: [],
+      sources: [],
+    };
+    useContextQuery.mockReturnValue({ ...noopMut, data: result, mutate: vi.fn() });
+
+    renderQuery();
+
+    await userEvent.selectOptions(screen.getByLabelText("Context window"), "7");
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question about your company data..."),
+      "What changed in pricing?",
+    );
+    await userEvent.click(screen.getByText("Ask"));
+
+    expect(screen.getByText("Window: last 7 days")).toBeInTheDocument();
   });
 
   it("renders multiline causal answers as separate paragraphs", () => {
@@ -392,11 +466,132 @@ describe("Query — real backend success response", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("MRR is growing at 12% MoM.")).toBeInTheDocument();
     expect(screen.getByText(/driven by expansion revenue/)).toBeInTheDocument();
     expect(screen.getByText(/Churn remains low/)).toBeInTheDocument();
+  });
+
+  it("renders supporting document links for the overall answer and cited components", () => {
+    const result = {
+      question: "Why did pricing change?",
+      answer: "Pricing moved after the finance review.",
+      confidence: 0.9,
+      reviewStatus: "needs_review",
+      reviewItemId: "rq1",
+      reviewSummary: "Pricing changed recently and still needs final human confirmation.",
+      components: [
+        {
+          id: "c1",
+          name: "Enterprise Pricing",
+          value: "$600/seat",
+          model: "Pricing Strategy",
+          reviewStatus: "superseded",
+          reviewItemId: "rq4",
+          temporalState: "historical",
+          sourceDocuments: [
+            { id: "sd1", label: "#pricing decision", connectorType: "slack" },
+          ],
+        },
+      ],
+      sourceDocuments: [
+        { id: "sd4", label: "Pricing Strategy", connectorType: "notion" },
+      ],
+      sources: [],
+    };
+    useContextQuery.mockReturnValue({ ...noopMut, data: result });
+
+    renderQuery();
+
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    expect(screen.getByText(/still needs final human confirmation/i)).toBeInTheDocument();
+    const reviewLinks = screen.getAllByRole("link", { name: "Open review item" });
+    expect(reviewLinks.some((link) => link.getAttribute("href") === "/app/review/rq1")).toBe(true);
+    expect(reviewLinks.some((link) => link.getAttribute("href") === "/app/review/rq4")).toBe(true);
+    expect(screen.getByText("Historical context")).toBeInTheDocument();
+    expect(screen.queryByText("Cited Components")).not.toBeInTheDocument();
+    expect(screen.getByText("Historical Context")).toBeInTheDocument();
+    expect(screen.getByText("Supporting documents")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Pricing Strategy/ })).toHaveAttribute(
+      "href",
+      "/app/sources/sd4",
+    );
+    expect(screen.getByText("Evidence")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /pricing decision/i })).toHaveAttribute(
+      "href",
+      "/app/sources/sd1",
+    );
+  });
+
+  it("loads cited-component evidence from the component sources endpoint when needed", () => {
+    useComponentSources.mockImplementation((componentId) => ({
+      data:
+        componentId === "c1"
+          ? [
+              {
+                id: "sd7",
+                label: "Pricing approval memo",
+                connectorType: "notion",
+                author: "CEO",
+                extractionContext: "Approved during pricing review",
+              },
+            ]
+          : [],
+      isLoading: false,
+      isError: false,
+    }));
+    const result = {
+      question: "Why did pricing change?",
+      answer: "Pricing moved after the finance review.",
+      confidence: 0.9,
+      components: [
+        {
+          id: "c1",
+          name: "Enterprise Pricing",
+          value: "$600/seat",
+          model: "Pricing Strategy",
+        },
+      ],
+      sources: [],
+    };
+    useContextQuery.mockReturnValue({ ...noopMut, data: result });
+
+    renderQuery();
+
+    expect(screen.getByRole("link", { name: /Pricing approval memo/i })).toHaveAttribute(
+      "href",
+      "/app/sources/sd7",
+    );
+    expect(screen.getByText("Author: CEO")).toBeInTheDocument();
+    expect(screen.getByText("Approved during pricing review")).toBeInTheDocument();
+  });
+
+  it("splits current and historical components into separate sections", () => {
+    const result = {
+      question: "What changed in churn?",
+      answer: "Current churn is 2.8%, but the older benchmark was 3.2%.",
+      confidence: 0.85,
+      components: [
+        { id: "c1", name: "Current Churn", value: "2.8%", model: "Health" },
+        {
+          id: "c2",
+          name: "Old Churn",
+          value: "3.2%",
+          model: "Health",
+          reviewStatus: "superseded",
+          temporalState: "historical",
+        },
+      ],
+      sources: [],
+    };
+    useContextQuery.mockReturnValue({ ...noopMut, data: result });
+
+    renderQuery();
+
+    expect(screen.getByText("Cited Components")).toBeInTheDocument();
+    expect(screen.getByText("Historical Context")).toBeInTheDocument();
+    expect(screen.getByText(/superseded facts are separated/i)).toBeInTheDocument();
   });
 
   it("omits component metadata line when fields are absent", () => {
@@ -411,7 +606,7 @@ describe("Query — real backend success response", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: result });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Metric")).toBeInTheDocument();
     expect(screen.queryByText(/confidence$/)).not.toBeInTheDocument();
@@ -435,7 +630,7 @@ describe("Query — network failure mock fallback", () => {
     };
     useContextQuery.mockReturnValue({ ...noopMut, data: mockResult });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Current MRR is $2.4M.")).toBeInTheDocument();
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
@@ -450,7 +645,7 @@ describe("Query — error state", () => {
       error: { message: "Server returned 500" },
     });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("Server returned 500")).toBeInTheDocument();
     expect(screen.getByText("Retry")).toBeInTheDocument();
@@ -465,7 +660,7 @@ describe("Query — error state", () => {
       error: { message: "Server error" },
     });
 
-    render(<Query />);
+    renderQuery();
 
     await userEvent.type(
       screen.getByPlaceholderText("Ask a question about your company data..."),
@@ -476,6 +671,30 @@ describe("Query — error state", () => {
     expect(mutate).toHaveBeenCalledWith("What is our MRR?");
   });
 
+  it("retry preserves the selected temporal window", async () => {
+    const mutate = vi.fn();
+    useContextQuery.mockReturnValue({
+      ...noopMut,
+      mutate,
+      isError: true,
+      error: { message: "Server error" },
+    });
+
+    renderQuery();
+
+    await userEvent.selectOptions(screen.getByLabelText("Context window"), "30");
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question about your company data..."),
+      "What changed in onboarding?",
+    );
+    await userEvent.click(screen.getByText("Retry"));
+
+    expect(mutate).toHaveBeenCalledWith({
+      question: "What changed in onboarding?",
+      maxAgeDays: 30,
+    });
+  });
+
   it("hides empty state when error is shown", () => {
     useContextQuery.mockReturnValue({
       ...noopMut,
@@ -483,7 +702,7 @@ describe("Query — error state", () => {
       error: { message: "fail" },
     });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.queryByText("Ask a question to query your knowledge graph.")).not.toBeInTheDocument();
   });
@@ -495,7 +714,7 @@ describe("Query — error state", () => {
       error: { message: "422 Unprocessable Entity", status: 422 },
     });
 
-    render(<Query />);
+    renderQuery();
 
     expect(screen.getByText("422 Unprocessable Entity")).toBeInTheDocument();
     expect(screen.queryByText(/Demo data/)).not.toBeInTheDocument();

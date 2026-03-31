@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 import app.services.connector_service as connector_module
 from app.connectors.base import NormalizedDocument
-from app.models.connector import Connector, ConnectorStatus, SyncState
+from app.models.connector import Connector, ConnectorStatus
 from app.models.source import ConnectorType, SourceDocument
 from app.utils.crypto import decrypt_token, encrypt_token
 
@@ -61,748 +61,6 @@ class TestListConnectors:
         )
         assert resp.status_code == 404
         assert resp.json()["detail"] == "Workspace not found"
-
-
-def _make_connected_slack(workspace, encrypted_token):
-    """Helper to create a connected Slack connector row."""
-    return Connector(
-        workspace_id=workspace.id,
-        connector_type=ConnectorType.SLACK,
-        status=ConnectorStatus.CONNECTED,
-        oauth_token_encrypted=encrypted_token,
-        config={"team_name": "Test"},
-    )
-
-
-async def _mock_fetch_initial_yielding(docs):
-    """Return an async generator that yields the given docs."""
-    for d in docs:
-        yield d
-
-
-class TestSyncConnector:
-    def _setup_encryption(self, monkeypatch):
-        monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
-
-    async def test_sync_runs_fetch_and_records_results(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-
-        sample_docs = [
-            NormalizedDocument(
-                external_id="C1:1234.5",
-                content="Hello world",
-                author="U1",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-            ),
-            NormalizedDocument(
-                external_id="C1:1234.6",
-                content="Another message",
-                author="U2",
-                created_at=datetime(2026, 3, 29, 11, 0, tzinfo=timezone.utc),
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(sample_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "completed"
-        assert body["last_sync_at"] is not None
-        assert "2 documents" in body["message"]
-
-        await db_session.refresh(conn)
-        assert conn.config["document_count"] == 2
-        assert "sync_cursor" not in conn.config  # cursor lives in SyncState now
-        assert "sync_queued_at" not in conn.config
-
-        # SyncState was created with cursor
-        sync_state = await db_session.scalar(
-            select(SyncState).where(SyncState.connector_id == conn.id)
-        )
-        assert sync_state is not None
-        assert sync_state.cursor is not None
-        assert sync_state.last_synced_at is not None
-
-    async def test_sync_incremental_uses_cursor(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = Connector(
-            workspace_id=workspace.id,
-            connector_type=ConnectorType.SLACK,
-            status=ConnectorStatus.CONNECTED,
-            oauth_token_encrypted=token_enc,
-            config={"team_name": "Test"},
-        )
-        db_session.add(conn)
-        await db_session.flush()
-
-        # Cursor lives in SyncState
-        ss = SyncState(connector_id=conn.id, cursor="1711699200.0")
-        db_session.add(ss)
-        await db_session.flush()
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_incremental = lambda cursor=None: _mock_fetch_initial_yielding([])
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "completed"
-        assert "0 documents" in resp.json()["message"]
-
-    async def test_incremental_sync_accumulates_document_count(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = Connector(
-            workspace_id=workspace.id,
-            connector_type=ConnectorType.SLACK,
-            status=ConnectorStatus.CONNECTED,
-            oauth_token_encrypted=token_enc,
-            config={
-                "document_count": 5,
-                "team_name": "Test",
-            },
-        )
-        db_session.add(conn)
-        await db_session.flush()
-
-        # Cursor in SyncState triggers incremental path
-        ss = SyncState(connector_id=conn.id, cursor="1711699200.0")
-        db_session.add(ss)
-        await db_session.flush()
-
-        sample_docs = [
-            NormalizedDocument(
-                external_id="C1:1234.7",
-                content="New message",
-                author="U3",
-                created_at=datetime(2026, 3, 29, 12, 0, tzinfo=timezone.utc),
-            ),
-            NormalizedDocument(
-                external_id="C1:1234.8",
-                content="Another new message",
-                author="U4",
-                created_at=datetime(2026, 3, 29, 12, 5, tzinfo=timezone.utc),
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_incremental = lambda cursor=None: _mock_fetch_initial_yielding(sample_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-        assert "2 documents" in resp.json()["message"]
-
-        await db_session.refresh(conn)
-        assert conn.config["document_count"] == 7
-        assert "sync_queued_at" not in conn.config
-
-    async def test_sync_disconnected_connector_returns_502(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        self._setup_encryption(monkeypatch)
-        conn = Connector(
-            workspace_id=workspace.id,
-            connector_type=ConnectorType.SLACK,
-            status=ConnectorStatus.DISCONNECTED,
-            config={},
-        )
-        db_session.add(conn)
-        await db_session.flush()
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 502
-        assert "not in a connected state" in resp.json()["detail"]
-
-    async def test_sync_auth_failure_marks_connector_error(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-revoked")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-
-        from app.connectors.base import AuthenticationError
-
-        async def _raise_auth():
-            raise AuthenticationError("Slack auth failed: token_revoked")
-            yield  # make it an async generator  # noqa: E702
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = _raise_auth
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 502
-        assert "token_revoked" in resp.json()["detail"]
-
-        await db_session.refresh(conn)
-        assert conn.status == ConnectorStatus.ERROR
-
-    async def test_sync_missing_connector_returns_404(self, client):
-        resp = await client.post(f"/api/connectors/{uuid4()}/sync")
-        assert resp.status_code == 404
-        assert resp.json()["detail"] == "Connector not found"
-
-    # ── Persistence & dedupe tests ────────────────────────────────
-
-    async def test_sync_persists_source_documents(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """Initial sync writes NormalizedDocuments into source_documents table."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-
-        sample_docs = [
-            NormalizedDocument(
-                external_id="C1:1001.0",
-                content="Hello from persistence test",
-                author="Alice",
-                source_url="https://slack.com/archives/C1/p10010",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "general"},
-            ),
-            NormalizedDocument(
-                external_id="C1:1002.0",
-                content="Second message",
-                author="Bob",
-                created_at=datetime(2026, 3, 29, 11, 0, tzinfo=timezone.utc),
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(sample_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        # Verify rows in source_documents
-        rows = list(await db_session.scalars(
-            select(SourceDocument)
-            .where(SourceDocument.connector_type == ConnectorType.SLACK)
-            .order_by(SourceDocument.external_id)
-        ))
-        assert len(rows) == 2
-        assert rows[0].external_id == "C1:1001.0"
-        assert rows[0].content == "Hello from persistence test"
-        assert rows[0].author == "Alice"
-        assert rows[0].source_url == "https://slack.com/archives/C1/p10010"
-        assert rows[0].created_at_source == datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc)
-        assert rows[0].metadata_json["channel_name"] == "general"
-        assert rows[1].external_id == "C1:1002.0"
-        assert rows[1].content == "Second message"
-
-    async def test_sync_deduplicates_on_resync(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """Re-syncing the same external_ids updates content, doesn't duplicate rows."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-
-        original_docs = [
-            NormalizedDocument(
-                external_id="C1:dedup.1",
-                content="Original content",
-                author="Alice",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-            ),
-        ]
-        updated_docs = [
-            NormalizedDocument(
-                external_id="C1:dedup.1",
-                content="Edited content",
-                author="Alice (edited)",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-            ),
-            NormalizedDocument(
-                external_id="C1:dedup.2",
-                content="Brand new message",
-                author="Bob",
-                created_at=datetime(2026, 3, 29, 12, 0, tzinfo=timezone.utc),
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        # First sync — one document
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(original_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        rows = list(await db_session.scalars(
-            select(SourceDocument).where(
-                SourceDocument.connector_type == ConnectorType.SLACK
-            )
-        ))
-        assert len(rows) == 1
-        assert rows[0].content == "Original content"
-
-        # Second sync — same external_id with edited content + one new doc
-        # Reset SyncState cursor so this runs as initial again
-        ss = await db_session.scalar(
-            select(SyncState).where(SyncState.connector_id == conn.id)
-        )
-        ss.cursor = None
-        await db_session.flush()
-
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(updated_docs)
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        # Expire cached ORM objects — raw SQL upsert bypasses identity map
-        db_session.expire_all()
-        rows = list(await db_session.scalars(
-            select(SourceDocument)
-            .where(SourceDocument.connector_type == ConnectorType.SLACK)
-            .order_by(SourceDocument.external_id)
-        ))
-        assert len(rows) == 2  # Not 3 — dedup prevented duplicate
-        assert rows[0].external_id == "C1:dedup.1"
-        assert rows[0].content == "Edited content"  # Updated, not duplicated
-        assert rows[0].author == "Alice (edited)"
-        assert rows[1].external_id == "C1:dedup.2"
-        assert rows[1].content == "Brand new message"
-
-    async def test_sync_creates_and_updates_sync_state(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """SyncState is created on first sync, updated on subsequent syncs."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-
-        # No SyncState yet
-        ss = await db_session.scalar(
-            select(SyncState).where(SyncState.connector_id == conn.id)
-        )
-        assert ss is None
-
-        sample_docs = [
-            NormalizedDocument(
-                external_id="C1:ss.1",
-                content="First message",
-                author="U1",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(sample_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        # SyncState created
-        ss = await db_session.scalar(
-            select(SyncState).where(SyncState.connector_id == conn.id)
-        )
-        assert ss is not None
-        first_cursor = ss.cursor
-        assert first_cursor is not None
-        assert ss.last_synced_at is not None
-        assert ss.last_synced_item_id == "C1:ss.1"
-
-        # Second sync — cursor advances
-        newer_docs = [
-            NormalizedDocument(
-                external_id="C1:ss.2",
-                content="Newer message",
-                author="U2",
-                created_at=datetime(2026, 3, 30, 8, 0, tzinfo=timezone.utc),
-            ),
-        ]
-        mock_connector.fetch_incremental = lambda cursor=None: _mock_fetch_initial_yielding(newer_docs)
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        await db_session.refresh(ss)
-        assert ss.cursor > first_cursor  # Cursor advanced
-        assert ss.last_synced_item_id == "C1:ss.2"
-
-    async def test_sync_reads_cursor_from_sync_state_not_config(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """When SyncState has a cursor, it drives incremental — config is ignored."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = Connector(
-            workspace_id=workspace.id,
-            connector_type=ConnectorType.SLACK,
-            status=ConnectorStatus.CONNECTED,
-            oauth_token_encrypted=token_enc,
-            config={"team_name": "Test"},
-        )
-        db_session.add(conn)
-        await db_session.flush()
-
-        # SyncState has a cursor — should trigger incremental
-        ss = SyncState(connector_id=conn.id, cursor="1711699200.0")
-        db_session.add(ss)
-        await db_session.flush()
-
-        calls = []
-
-        async def _track_incremental(cursor=None):
-            calls.append(("incremental", cursor))
-            return
-            yield  # noqa: E702
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_incremental = _track_incremental
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        # Verify fetch_incremental was called with the SyncState cursor
-        assert len(calls) == 1
-        assert calls[0] == ("incremental", "1711699200.0")
-
-    async def test_incremental_update_only_does_not_inflate_count(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """Editing already-known docs in a delta sync must not inflate document_count."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-
-        original_docs = [
-            NormalizedDocument(
-                external_id="C1:inflat.1",
-                content="Original A",
-                author="U1",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-            ),
-            NormalizedDocument(
-                external_id="C1:inflat.2",
-                content="Original B",
-                author="U2",
-                created_at=datetime(2026, 3, 29, 11, 0, tzinfo=timezone.utc),
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(original_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        # Initial sync — 2 new docs
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-        await db_session.refresh(conn)
-        assert conn.config["document_count"] == 2
-
-        # Incremental sync that re-fetches the same 2 docs (edits, not new)
-        edited_docs = [
-            NormalizedDocument(
-                external_id="C1:inflat.1",
-                content="Edited A",
-                author="U1",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-            ),
-            NormalizedDocument(
-                external_id="C1:inflat.2",
-                content="Edited B",
-                author="U2",
-                created_at=datetime(2026, 3, 29, 11, 0, tzinfo=timezone.utc),
-            ),
-        ]
-        mock_connector.fetch_incremental = lambda cursor=None: _mock_fetch_initial_yielding(edited_docs)
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        await db_session.refresh(conn)
-        # Count must stay at 2 — updates don't inflate
-        assert conn.config["document_count"] == 2
-        assert "0 documents" in conn.config["message"]
-
-        # Content was actually updated
-        db_session.expire_all()
-        row = await db_session.scalar(
-            select(SourceDocument).where(SourceDocument.external_id == "C1:inflat.1")
-        )
-        assert row.content == "Edited A"
-
-    async def test_last_synced_at_reflects_completion_not_start(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """last_sync_at and SyncState.last_synced_at are stamped after
-        fetch/persist finishes, not when the sync starts."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-
-        before_sync = datetime.now(timezone.utc)
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding([])
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        after_sync = datetime.now(timezone.utc)
-
-        await db_session.refresh(conn)
-        ss = await db_session.scalar(
-            select(SyncState).where(SyncState.connector_id == conn.id)
-        )
-
-        # Both timestamps are between before and after (i.e. after the start marker)
-        assert conn.last_sync_at >= before_sync
-        assert conn.last_sync_at <= after_sync
-        assert ss.last_synced_at >= before_sync
-        assert ss.last_synced_at <= after_sync
-
-    async def test_legacy_config_cursor_migrates_to_sync_state(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """A connector with sync_cursor in config (legacy) still works
-        and the cursor gets migrated to SyncState."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = Connector(
-            workspace_id=workspace.id,
-            connector_type=ConnectorType.SLACK,
-            status=ConnectorStatus.CONNECTED,
-            oauth_token_encrypted=token_enc,
-            config={"sync_cursor": "1711699200.0", "team_name": "Test"},
-        )
-        db_session.add(conn)
-        await db_session.flush()
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_incremental = lambda cursor=None: _mock_fetch_initial_yielding([])
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        await db_session.refresh(conn)
-        # sync_cursor removed from config
-        assert "sync_cursor" not in conn.config
-
-        # Cursor now in SyncState
-        ss = await db_session.scalar(
-            select(SyncState).where(SyncState.connector_id == conn.id)
-        )
-        assert ss is not None
-        assert ss.cursor == "1711699200.0"
-
-    async def test_edited_document_resets_processed_at_for_reprocessing(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """When a document's content changes on re-sync, processed_at is
-        reset to NULL so the ingestion pipeline re-extracts it."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-        conn_id = conn.id
-
-        original_docs = [
-            NormalizedDocument(
-                external_id="C1:reprocess.1",
-                content="decision: ship v1 Monday",
-                author="PM",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "product"},
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(original_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        # Initial sync — doc is persisted and processed
-        resp = await client.post(f"/api/connectors/{conn_id}/sync")
-        assert resp.status_code == 200
-
-        db_session.expire_all()
-        row = await db_session.scalar(
-            select(SourceDocument).where(
-                SourceDocument.external_id == "C1:reprocess.1"
-            )
-        )
-        assert row.processed_at is not None
-
-        # Incremental sync — same external_id but content edited
-        edited_docs = [
-            NormalizedDocument(
-                external_id="C1:reprocess.1",
-                content="decision: ship v1 Wednesday instead",
-                author="PM",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "product"},
-            ),
-        ]
-        mock_connector.fetch_incremental = lambda cursor=None: (
-            _mock_fetch_initial_yielding(edited_docs)
-        )
-
-        resp = await client.post(f"/api/connectors/{conn_id}/sync")
-        assert resp.status_code == 200
-
-        db_session.expire_all()
-        row = await db_session.scalar(
-            select(SourceDocument).where(
-                SourceDocument.external_id == "C1:reprocess.1"
-            )
-        )
-        # Content updated
-        assert row.content == "decision: ship v1 Wednesday instead"
-        # processed_at was reset, then re-stamped by ingestion pipeline
-        assert row.processed_at is not None
-
-        # Verify the component was updated with new content
-        from app.models.knowledge import Component
-        comps = list(await db_session.scalars(
-            select(Component).where(Component.value.like("%Wednesday%"))
-        ))
-        assert len(comps) >= 1
-
-    async def test_unchanged_content_keeps_processed_at(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        """When a re-sync fetches a document with identical content,
-        processed_at is NOT reset — the doc is not re-extracted."""
-        self._setup_encryption(monkeypatch)
-        token_enc = encrypt_token("xoxb-test-token")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
-        await db_session.flush()
-        conn_id = conn.id
-
-        original_docs = [
-            NormalizedDocument(
-                external_id="C1:unchanged.1",
-                content="decision: ship v1 Monday",
-                author="PM",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "product"},
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(original_docs)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
-        )
-
-        # Initial sync — doc is persisted and processed
-        resp = await client.post(f"/api/connectors/{conn_id}/sync")
-        assert resp.status_code == 200
-
-        db_session.expire_all()
-        row = await db_session.scalar(
-            select(SourceDocument).where(
-                SourceDocument.external_id == "C1:unchanged.1"
-            )
-        )
-        first_processed_at = row.processed_at
-        assert first_processed_at is not None
-
-        # Incremental sync — same external_id, SAME content
-        mock_connector.fetch_incremental = lambda cursor=None: (
-            _mock_fetch_initial_yielding(original_docs)
-        )
-
-        resp = await client.post(f"/api/connectors/{conn_id}/sync")
-        assert resp.status_code == 200
-
-        db_session.expire_all()
-        row = await db_session.scalar(
-            select(SourceDocument).where(
-                SourceDocument.external_id == "C1:unchanged.1"
-            )
-        )
-        # processed_at should NOT have been reset — content is identical
-        assert row.processed_at is not None
-        # The second sync should have processed 0 documents
-        body = resp.json()
-        assert "processed 0" in body["message"]
 
 
 class TestDisconnectConnector:
@@ -1393,3 +651,646 @@ class TestSlackConnector:
         assert "Thread replies:" in doc.content
         assert "Bob: Need pricing approval" in doc.content
         assert "Alice: Waiting on finance" in doc.content
+
+
+# ── Notion connect ─────────────────────────────────────────────────
+
+
+class TestNotionConnect:
+    """Tests for POST /api/connectors/notion/connect."""
+
+    async def test_connect_creates_connector(
+        self, client, workspace, db_session, monkeypatch
+    ):
+        monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
+
+        resp = await client.post(
+            "/api/connectors/notion/connect",
+            json={
+                "workspace_id": str(workspace.id),
+                "token": "ntn_test_integration_token",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["connector_type"] == "notion"
+        assert body["status"] == "connected"
+        assert body["workspace_id"] == str(workspace.id)
+        assert body["provider"] == "dlt"
+
+        # Token is stored encrypted
+        conn = await db_session.scalar(
+            select(Connector).where(Connector.id == body["id"])
+        )
+        assert conn.oauth_token_encrypted is not None
+        assert conn.oauth_token_encrypted != "ntn_test_integration_token"
+        assert decrypt_token(conn.oauth_token_encrypted) == "ntn_test_integration_token"
+
+    async def test_connect_updates_existing_connector(
+        self, client, workspace, db_session, monkeypatch
+    ):
+        monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
+
+        # Pre-create a disconnected Notion connector
+        existing = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.NOTION,
+            status=ConnectorStatus.DISCONNECTED,
+            config={"document_count": 42},
+        )
+        db_session.add(existing)
+        await db_session.flush()
+        existing_id = existing.id
+
+        resp = await client.post(
+            "/api/connectors/notion/connect",
+            json={
+                "workspace_id": str(workspace.id),
+                "token": "ntn_new_token",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Same connector row was updated, not duplicated
+        assert body["id"] == str(existing_id)
+        assert body["status"] == "connected"
+
+        await db_session.refresh(existing)
+        assert decrypt_token(existing.oauth_token_encrypted) == "ntn_new_token"
+
+    async def test_connect_missing_workspace_returns_404(
+        self, client, monkeypatch
+    ):
+        monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
+
+        resp = await client.post(
+            "/api/connectors/notion/connect",
+            json={
+                "workspace_id": str(uuid4()),
+                "token": "ntn_whatever",
+            },
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Workspace not found"
+
+    async def test_connect_blank_token_returns_422(
+        self, client, workspace, monkeypatch
+    ):
+        monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
+
+        resp = await client.post(
+            "/api/connectors/notion/connect",
+            json={
+                "workspace_id": str(workspace.id),
+                "token": "   ",
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_connect_missing_encryption_key_returns_501(
+        self, client, workspace, monkeypatch
+    ):
+        monkeypatch.setattr(connector_module.settings, "encryption_key", None)
+
+        resp = await client.post(
+            "/api/connectors/notion/connect",
+            json={
+                "workspace_id": str(workspace.id),
+                "token": "ntn_valid_token",
+            },
+        )
+        assert resp.status_code == 501
+
+
+# ── Source document browsing ────────────────────────────────────────
+
+
+def _make_source_doc(connector, external_id, content, *, processed=False):
+    """Helper to create a SourceDocument row."""
+    from datetime import datetime, timezone
+
+    doc = SourceDocument(
+        connector_id=connector.id,
+        connector_type=connector.connector_type,
+        external_id=external_id,
+        content=content,
+        author="test-author",
+        ingested_at=datetime.now(timezone.utc),
+    )
+    if processed:
+        doc.processed_at = datetime.now(timezone.utc)
+    return doc
+
+
+class TestListSourceDocuments:
+    """Tests for GET /api/source-documents."""
+
+    async def test_list_returns_documents(
+        self, client, workspace, db_session
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        d1 = _make_source_doc(conn, "ext-1", "Hello world")
+        d2 = _make_source_doc(conn, "ext-2", "Second doc")
+        db_session.add_all([d1, d2])
+        await db_session.flush()
+
+        resp = await client.get(
+            "/api/source-documents",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 2
+        assert len(body["items"]) == 2
+        assert body["has_more"] is False
+
+    async def test_list_filters_by_connector_type(
+        self, client, workspace, db_session
+    ):
+        slack_conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        notion_conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.NOTION,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add_all([slack_conn, notion_conn])
+        await db_session.flush()
+
+        db_session.add_all([
+            _make_source_doc(slack_conn, "s1", "Slack msg"),
+            _make_source_doc(notion_conn, "n1", "Notion page"),
+        ])
+        await db_session.flush()
+
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "connector_type": "notion",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["connector_type"] == "notion"
+
+    async def test_list_filters_by_processed_status(
+        self, client, workspace, db_session
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        db_session.add_all([
+            _make_source_doc(conn, "p1", "Processed", processed=True),
+            _make_source_doc(conn, "u1", "Unprocessed", processed=False),
+        ])
+        await db_session.flush()
+
+        # Only processed
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "processed": "true",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["external_id"] == "p1"
+        assert body["items"][0]["processed_at"] is not None
+
+        # Only unprocessed
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "processed": "false",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["external_id"] == "u1"
+        assert body["items"][0]["processed_at"] is None
+
+    async def test_list_pagination(self, client, workspace, db_session):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        for i in range(5):
+            db_session.add(_make_source_doc(conn, f"pg-{i}", f"Doc {i}"))
+        await db_session.flush()
+
+        # First page — limit 2
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "limit": 2,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["items"]) == 2
+        assert body["total"] == 5
+        assert body["has_more"] is True
+        assert body["next_cursor"] is not None
+
+        # Second page using cursor
+        resp2 = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "limit": 2,
+                "cursor": body["next_cursor"],
+            },
+        )
+        assert resp2.status_code == 200
+        body2 = resp2.json()
+        assert len(body2["items"]) == 2
+        assert body2["has_more"] is True
+
+        # Ensure no overlap between pages
+        page1_ids = {item["id"] for item in body["items"]}
+        page2_ids = {item["id"] for item in body2["items"]}
+        assert page1_ids.isdisjoint(page2_ids)
+
+    async def test_list_pagination_same_timestamp(
+        self, client, workspace, db_session
+    ):
+        """Docs batch-inserted with identical ingested_at must not be
+        skipped or duplicated across pages."""
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        # All docs share the exact same ingested_at
+        shared_ts = datetime(2026, 3, 30, 12, 0, tzinfo=timezone.utc)
+        for i in range(6):
+            doc = SourceDocument(
+                connector_id=conn.id,
+                connector_type=ConnectorType.SLACK,
+                external_id=f"same-ts-{i}",
+                content=f"Doc {i}",
+                author="bot",
+                ingested_at=shared_ts,
+            )
+            db_session.add(doc)
+        await db_session.flush()
+
+        all_ids: set[str] = set()
+        cursor = None
+        pages = 0
+        while True:
+            params: dict = {
+                "workspace_id": str(workspace.id),
+                "limit": 2,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            resp = await client.get("/api/source-documents", params=params)
+            assert resp.status_code == 200
+            body = resp.json()
+            page_ids = {item["id"] for item in body["items"]}
+
+            # No duplicates
+            assert all_ids.isdisjoint(page_ids), "Duplicate docs across pages"
+            all_ids.update(page_ids)
+
+            pages += 1
+            if not body["has_more"]:
+                break
+            cursor = body["next_cursor"]
+
+        # All 6 docs were returned exactly once
+        assert len(all_ids) == 6
+
+    async def test_list_pagination_ignores_cursor_from_other_workspace(
+        self, client, workspace, db_session
+    ):
+        """A cursor from another workspace must not affect this workspace's page."""
+        from app.models.user import Workspace
+
+        other_ws = Workspace(id=uuid4(), name="Other Workspace")
+        db_session.add(other_ws)
+        await db_session.flush()
+
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        other_conn = Connector(
+            workspace_id=other_ws.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add_all([conn, other_conn])
+        await db_session.flush()
+
+        db_session.add_all([
+            SourceDocument(
+                connector_id=conn.id,
+                connector_type=ConnectorType.SLACK,
+                external_id="ws-newest",
+                content="Newest in workspace",
+                author="bot",
+                ingested_at=datetime(2026, 3, 30, 13, 0, tzinfo=timezone.utc),
+            ),
+            SourceDocument(
+                connector_id=conn.id,
+                connector_type=ConnectorType.SLACK,
+                external_id="ws-middle",
+                content="Middle in workspace",
+                author="bot",
+                ingested_at=datetime(2026, 3, 30, 12, 0, tzinfo=timezone.utc),
+            ),
+            SourceDocument(
+                connector_id=conn.id,
+                connector_type=ConnectorType.SLACK,
+                external_id="ws-oldest",
+                content="Oldest in workspace",
+                author="bot",
+                ingested_at=datetime(2026, 3, 30, 11, 0, tzinfo=timezone.utc),
+            ),
+        ])
+
+        foreign_cursor_doc = SourceDocument(
+            connector_id=other_conn.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="foreign-cursor",
+            content="Foreign workspace doc",
+            author="bot",
+            ingested_at=datetime(2026, 3, 30, 11, 30, tzinfo=timezone.utc),
+        )
+        db_session.add(foreign_cursor_doc)
+        await db_session.flush()
+
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "limit": 2,
+                "cursor": str(foreign_cursor_doc.id),
+            },
+        )
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert body["total"] == 3
+        assert [item["external_id"] for item in body["items"]] == [
+            "ws-newest",
+            "ws-middle",
+        ]
+        assert body["has_more"] is True
+        assert body["next_cursor"] is not None
+
+    async def test_list_empty_workspace(self, client, workspace):
+        resp = await client.get(
+            "/api/source-documents",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 0
+        assert body["items"] == []
+        assert body["has_more"] is False
+
+    async def test_list_missing_workspace_returns_404(self, client):
+        resp = await client.get(
+            "/api/source-documents",
+            params={"workspace_id": str(uuid4())},
+        )
+        assert resp.status_code == 404
+
+    async def test_list_invalid_connector_type_returns_400(
+        self, client, workspace
+    ):
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "connector_type": "invalid_type",
+            },
+        )
+        assert resp.status_code == 400
+        assert "Invalid connector_type" in resp.json()["detail"]
+
+    async def test_list_invalid_limit_returns_400(self, client, workspace):
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "limit": 0,
+            },
+        )
+        assert resp.status_code == 400
+        assert "limit" in resp.json()["detail"].lower()
+
+        resp = await client.get(
+            "/api/source-documents",
+            params={
+                "workspace_id": str(workspace.id),
+                "limit": 201,
+            },
+        )
+        assert resp.status_code == 400
+
+
+# ── Source document detail ──────────────────────────────────────────
+
+
+class TestGetSourceDocument:
+    """Tests for GET /api/source-documents/{document_id}."""
+
+    async def test_get_existing_document(
+        self, client, workspace, db_session
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.NOTION,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        doc = _make_source_doc(conn, "notion-page-1", "Page content here")
+        db_session.add(doc)
+        await db_session.flush()
+
+        resp = await client.get(
+            f"/api/source-documents/{doc.id}",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["external_id"] == "notion-page-1"
+        assert body["content"] == "Page content here"
+        assert body["connector_type"] == "notion"
+
+    async def test_get_missing_document_returns_404(self, client, workspace):
+        resp = await client.get(
+            f"/api/source-documents/{uuid4()}",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Source document not found"
+
+    async def test_cross_workspace_returns_404(
+        self, client, workspace, db_session
+    ):
+        """A valid doc ID from another workspace must not be readable."""
+        from app.models.user import Workspace
+
+        other_ws = Workspace(id=uuid4(), name="Other Workspace")
+        db_session.add(other_ws)
+        await db_session.flush()
+
+        conn = Connector(
+            workspace_id=other_ws.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        doc = _make_source_doc(conn, "secret-doc", "Sensitive content")
+        db_session.add(doc)
+        await db_session.flush()
+
+        # Request with workspace.id should NOT see other_ws's doc
+        resp = await client.get(
+            f"/api/source-documents/{doc.id}",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 404
+
+
+# ── Processing summary ──────────────────────────────────────────────
+
+
+class TestProcessingSummary:
+    """Tests for GET /api/connectors/processing-summary."""
+
+    async def test_summary_with_documents(
+        self, client, workspace, db_session
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        db_session.add_all([
+            _make_source_doc(conn, "ps-1", "Processed doc", processed=True),
+            _make_source_doc(conn, "ps-2", "Unprocessed doc", processed=False),
+            _make_source_doc(conn, "ps-3", "Another processed", processed=True),
+        ])
+        await db_session.flush()
+
+        resp = await client.get(
+            "/api/connectors/processing-summary",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 1
+        summary = body[0]
+        assert summary["connector_type"] == "slack"
+        assert summary["total_documents"] == 3
+        assert summary["processed_documents"] == 2
+        assert summary["unprocessed_documents"] == 1
+
+    async def test_summary_empty_workspace(self, client, workspace):
+        resp = await client.get(
+            "/api/connectors/processing-summary",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_summary_multiple_connectors(
+        self, client, workspace, db_session
+    ):
+        slack = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        notion = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.NOTION,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add_all([slack, notion])
+        await db_session.flush()
+
+        db_session.add_all([
+            _make_source_doc(slack, "s1", "Slack msg", processed=True),
+            _make_source_doc(notion, "n1", "Page 1", processed=False),
+            _make_source_doc(notion, "n2", "Page 2", processed=True),
+        ])
+        await db_session.flush()
+
+        resp = await client.get(
+            "/api/connectors/processing-summary",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 2
+
+        by_type = {s["connector_type"]: s for s in body}
+        assert by_type["slack"]["total_documents"] == 1
+        assert by_type["slack"]["processed_documents"] == 1
+        assert by_type["notion"]["total_documents"] == 2
+        assert by_type["notion"]["unprocessed_documents"] == 1
+
+    async def test_summary_missing_workspace_returns_404(self, client):
+        resp = await client.get(
+            "/api/connectors/processing-summary",
+            params={"workspace_id": str(uuid4())},
+        )
+        assert resp.status_code == 404

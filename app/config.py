@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     slack_client_secret: str | None = None
     slack_redirect_uri: str | None = None
     oauth_state_ttl_seconds: int = 600
+    celery_task_time_limit: int = 600  # 10 min hard kill per task
 
     model_config = SettingsConfigDict(
         env_file=".env",

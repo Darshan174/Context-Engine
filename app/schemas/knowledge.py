@@ -47,6 +47,14 @@ class RelationshipCreate(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class ComponentSourceDocumentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    label: str
+    connector_type: str
+
+
 class ComponentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -56,8 +64,16 @@ class ComponentRead(BaseModel):
     value: str
     confidence: float
     authority_source: str | None
+    valid_from: datetime
+    valid_to: datetime | None
+    superseded_by: UUID | None = None
     last_verified_at: datetime
     is_stale: bool
+    review_status: str | None = None
+    review_summary: str | None = None
+    review_item_id: UUID | None = None
+    temporal_state: str | None = None
+    source_documents: list[ComponentSourceDocumentRead] = []
     created_at: datetime
     updated_at: datetime
 
@@ -91,4 +107,8 @@ class RelationshipRead(BaseModel):
     sentiment: RelationshipSentiment
     description: str | None
     confidence: float
+    valid_from: datetime
+    valid_to: datetime | None = None
+    superseded_by: UUID | None = None
+    temporal_state: str | None = None
     created_at: datetime

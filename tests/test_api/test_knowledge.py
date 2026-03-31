@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+
+from app.models.connector import Connector, ConnectorStatus
+from app.models.knowledge import Component, ComponentSource, KnowledgeModel
+from app.models.review import ReviewItem
+from app.models.source import ConnectorType, SourceDocument
 
 # ---------------------------------------------------------------------------
 # POST /api/models
@@ -92,6 +98,82 @@ class TestGetComponent:
         assert body["id"] == created_component["id"]
         assert body["name"] == created_component["name"]
         assert body["value"] == created_component["value"]
+
+    async def test_get_component_includes_temporal_review_and_sources(
+        self, client, db_session, workspace
+    ):
+        connector = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        model = KnowledgeModel(
+            workspace_id=workspace.id,
+            name="Roadmap",
+            description="Roadmap facts",
+        )
+        db_session.add_all([connector, model])
+        await db_session.flush()
+
+        component = Component(
+            model_id=model.id,
+            name="Launch Date",
+            value="Q3",
+            confidence=0.55,
+        )
+        db_session.add(component)
+        await db_session.flush()
+
+        document = SourceDocument(
+            connector_id=connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="slack-roadmap-knowledge-1",
+            content="decision: Launch Date is Q3",
+            author="PM",
+            processed_at=datetime(2026, 3, 31, tzinfo=timezone.utc),
+            metadata_json={"location": "#roadmap launch thread"},
+        )
+        db_session.add(document)
+        await db_session.flush()
+
+        db_session.add(
+            ComponentSource(
+                component_id=component.id,
+                source_document_id=document.id,
+                extraction_context="Extracted from roadmap thread",
+            )
+        )
+        db_session.add(
+            ReviewItem(
+                component_id=component.id,
+                status="needs_review",
+                severity="medium",
+                kind="low_confidence",
+                title="Launch Date extracted with low confidence",
+                summary="Launch Date still needs review.",
+                confidence=0.55,
+            )
+        )
+        await db_session.flush()
+
+        resp = await client.get(f"/api/components/{component.id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["valid_from"] is not None
+        assert body["valid_to"] is None
+        assert body["superseded_by"] is None
+        assert body["review_status"] == "needs_review"
+        assert body["review_item_id"] is not None
+        assert body["review_summary"] == "Launch Date still needs review."
+        assert body["temporal_state"] is None
+        assert body["source_documents"] == [
+            {
+                "id": str(document.id),
+                "label": "#roadmap launch thread",
+                "connector_type": "slack",
+            }
+        ]
 
     async def test_get_missing_component_returns_404(self, client, workspace):
         resp = await client.get(f"/api/components/{uuid4()}")

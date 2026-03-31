@@ -151,6 +151,7 @@ class QueryService:
             select(KnowledgeModel)
             .options(
                 selectinload(KnowledgeModel.components).selectinload(Component.source_documents),
+                selectinload(KnowledgeModel.components).selectinload(Component.review_item),
                 selectinload(KnowledgeModel.components)
                 .selectinload(Component.outgoing_relationships)
                 .selectinload(Relationship.target_component),
@@ -189,6 +190,10 @@ class QueryService:
 
             for component in model.components:
                 if component.confidence < filters.min_confidence:
+                    continue
+                if component.valid_to is not None:
+                    continue
+                if component.review_status in {"rejected", "superseded"}:
                     continue
                 if not self._within_age_limit(component, filters.max_age_days):
                     continue
@@ -258,6 +263,21 @@ class QueryService:
             confidence=scored.component.confidence,
             authority_source=scored.component.authority_source,
             last_verified_at=scored.component.last_verified_at,
+            valid_from=scored.component.valid_from,
+            valid_to=scored.component.valid_to,
+            superseded_by=scored.component.superseded_by,
+            review_status=scored.component.review_status,
+            review_summary=scored.component.review_summary,
+            review_item_id=scored.component.review_item_id,
+            temporal_state=scored.component.temporal_state,
+            source_documents=[
+                {
+                    "id": document.id,
+                    "label": document.label,
+                    "connector_type": document.connector_type.value,
+                }
+                for document in scored.component.source_documents
+            ],
         )
 
     def _serialize_sources(self, scored: Iterable[ScoredComponent]) -> list[QuerySourceRead]:
@@ -347,6 +367,8 @@ class QueryService:
         candidates: list[tuple[float, Relationship, Component]] = []
 
         for relation in chain(component.outgoing_relationships, component.incoming_relationships):
+            if relation.valid_to is not None:
+                continue
             other_component = self._other_component(component, relation)
             if other_component is None:
                 continue

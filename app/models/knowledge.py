@@ -26,6 +26,7 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.source import enum_values
 
 if TYPE_CHECKING:
+    from app.models.review import ReviewItem
     from app.models.source import SourceDocument
     from app.models.user import Workspace
 
@@ -102,6 +103,21 @@ class Component(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     authority_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    superseded_by_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("components.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     last_verified_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -130,11 +146,49 @@ class Component(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="component",
         cascade="all, delete-orphan",
     )
+    review_item: Mapped["ReviewItem | None"] = orm_relationship(
+        back_populates="component",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
     source_documents: Mapped[list["SourceDocument"]] = orm_relationship(
         secondary="component_sources",
         back_populates="components",
         viewonly=True,
     )
+    superseded_by_component: Mapped["Component | None"] = orm_relationship(
+        remote_side="Component.id",
+        foreign_keys=[superseded_by_id],
+        post_update=True,
+    )
+
+    @property
+    def review_status(self) -> str | None:
+        if self.review_item is None:
+            return None
+        return self.review_item.status
+
+    @property
+    def review_summary(self) -> str | None:
+        if self.review_item is None:
+            return None
+        return self.review_item.summary
+
+    @property
+    def review_item_id(self) -> UUID | None:
+        if self.review_item is None:
+            return None
+        return self.review_item.id
+
+    @property
+    def temporal_state(self) -> str | None:
+        if self.valid_to is None:
+            return None
+        return "historical"
+
+    @property
+    def superseded_by(self) -> UUID | None:
+        return self.superseded_by_id
 
 
 class Relationship(UUIDPrimaryKeyMixin, Base):
@@ -179,6 +233,21 @@ class Relationship(UUIDPrimaryKeyMixin, Base):
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    superseded_by_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("relationships.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -193,6 +262,11 @@ class Relationship(UUIDPrimaryKeyMixin, Base):
         back_populates="incoming_relationships",
         foreign_keys=[target_component_id],
     )
+    superseded_by_relationship: Mapped["Relationship | None"] = orm_relationship(
+        remote_side="Relationship.id",
+        foreign_keys=[superseded_by_id],
+        post_update=True,
+    )
 
     @property
     def source_component_name(self) -> str | None:
@@ -205,6 +279,16 @@ class Relationship(UUIDPrimaryKeyMixin, Base):
         if self.target_component is None:
             return None
         return self.target_component.name
+
+    @property
+    def temporal_state(self) -> str | None:
+        if self.valid_to is None:
+            return None
+        return "historical"
+
+    @property
+    def superseded_by(self) -> UUID | None:
+        return self.superseded_by_id
 
 
 class ComponentSource(Base):

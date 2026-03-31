@@ -62,7 +62,17 @@ class KnowledgeService:
         return result
 
     async def get_component(self, component_id: UUID) -> Component:
-        return await self._get_component(component_id)
+        component = await self.session.scalar(
+            select(Component)
+            .options(
+                selectinload(Component.source_documents),
+                selectinload(Component.review_item),
+            )
+            .where(Component.id == component_id)
+        )
+        if component is None:
+            raise ResourceNotFoundError("Component not found")
+        return component
 
     async def add_component(self, model_id: UUID, **payload: object) -> Component:
         model = await self.get_model(model_id)
@@ -154,7 +164,10 @@ class KnowledgeService:
     def _model_select(self, model_id: UUID) -> Select[tuple[KnowledgeModel]]:
         return (
             select(KnowledgeModel)
-            .options(selectinload(KnowledgeModel.components))
+            .options(
+                selectinload(KnowledgeModel.components).selectinload(Component.source_documents),
+                selectinload(KnowledgeModel.components).selectinload(Component.review_item),
+            )
             .where(KnowledgeModel.id == model_id)
         )
 

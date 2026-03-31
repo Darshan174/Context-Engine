@@ -34,8 +34,8 @@ export default function WorkspaceSwitcher() {
     qc.invalidateQueries({ queryKey: ["model"] });
     qc.invalidateQueries({ queryKey: ["model-relationships"] });
     // If on a model detail page, navigate away — that model belongs to the old workspace
-    if (location.pathname.startsWith("/model/")) {
-      navigate("/models");
+    if (location.pathname.startsWith("/app/model/")) {
+      navigate("/app/models");
     }
   };
 

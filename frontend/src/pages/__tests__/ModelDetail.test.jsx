@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import ModelDetail from "../ModelDetail";
 
 vi.mock("../../api/hooks", () => ({
+  useComponentSources: vi.fn(),
   useModel: vi.fn(),
   useCreateComponent: vi.fn(),
   useUpdateComponent: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("../../components/RelationshipsPanel", () => ({
 }));
 
 import {
+  useComponentSources,
   useModel,
   useCreateComponent,
   useUpdateComponent,
@@ -37,6 +39,18 @@ const backendModel = {
       confidence: 0.95,
       last_verified_at: "2024-01-01T00:00:00Z",
       authority_source: "Stripe",
+      reviewStatus: "needs_review",
+      reviewItemId: "rq1",
+      reviewSummary: "Finance still needs to confirm the month-end adjustment.",
+      sourceDocuments: [
+        {
+          id: "sd5",
+          label: "#finance revenue decision",
+          connectorType: "slack",
+          author: "Alice",
+          extractionContext: "Extracted from finance thread",
+        },
+      ],
     },
     {
       id: "comp-2",
@@ -45,6 +59,9 @@ const backendModel = {
       confidence: 0.8,
       last_verified_at: null,
       authority_source: null,
+      reviewStatus: "superseded",
+      reviewItemId: "rq4",
+      temporalState: "historical",
     },
   ],
 };
@@ -70,6 +87,7 @@ function renderDetail(modelId = "model-1") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useComponentSources.mockReturnValue({ data: [], isLoading: false, isError: false });
   useCreateComponent.mockReturnValue(noopMut);
   useUpdateComponent.mockReturnValue(noopMut);
   useDeleteComponent.mockReturnValue(noopMut);
@@ -89,6 +107,64 @@ describe("ModelDetail", () => {
     expect(screen.getByText("MRR")).toBeInTheDocument();
     expect(screen.getByText("$2.4M")).toBeInTheDocument();
     expect(screen.getByText("Churn Rate")).toBeInTheDocument();
+  });
+
+  it("renders source-backed evidence links when component provenance exists", () => {
+    useModel.mockReturnValue({ isLoading: false, isError: false, data: backendModel, refetch: vi.fn() });
+    renderDetail();
+
+    expect(screen.getByText("Current components")).toBeInTheDocument();
+    expect(screen.getAllByText("Historical context").length).toBeGreaterThan(0);
+    expect(screen.getByText(/superseded facts are separated below/i)).toBeInTheDocument();
+    expect(screen.getByText("Evidence")).toBeInTheDocument();
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    const reviewLinks = screen.getAllByRole("link", { name: "Open review item" });
+    expect(reviewLinks.some((link) => link.getAttribute("href") === "/app/review/rq1")).toBe(true);
+    expect(screen.getByRole("link", { name: /finance revenue decision/i })).toHaveAttribute(
+      "href",
+      "/app/sources/sd5",
+    );
+    expect(screen.getByText("Author: Alice")).toBeInTheDocument();
+    expect(screen.getByText("Extracted from finance thread")).toBeInTheDocument();
+  });
+
+  it("loads evidence from the component sources endpoint when inline provenance is absent", () => {
+    useComponentSources.mockImplementation((componentId) => ({
+      data:
+        componentId === "comp-1"
+          ? [
+              {
+                id: "sd6",
+                label: "Finance signoff note",
+                connectorType: "notion",
+                author: "CFO",
+                extractionContext: "Extracted from approval note",
+              },
+            ]
+          : [],
+      isLoading: false,
+      isError: false,
+    }));
+    useModel.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        ...backendModel,
+        components: backendModel.components.map((component) =>
+          component.id === "comp-1" ? { ...component, sourceDocuments: [] } : component,
+        ),
+      },
+      refetch: vi.fn(),
+    });
+
+    renderDetail();
+
+    expect(screen.getByRole("link", { name: /Finance signoff note/i })).toHaveAttribute(
+      "href",
+      "/app/sources/sd6",
+    );
+    expect(screen.getByText("Author: CFO")).toBeInTheDocument();
+    expect(screen.getByText("Extracted from approval note")).toBeInTheDocument();
   });
 
   it("shows Edit/Delete buttons for backend data", () => {

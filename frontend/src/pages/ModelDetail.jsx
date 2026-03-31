@@ -27,6 +27,8 @@ export default function ModelDetail() {
 
   const model = query.data ?? { name: "Unknown", description: "", components: [] };
   const components = model.components ?? [];
+  const activeComponents = components.filter((component) => !isHistoricalComponent(component));
+  const historicalComponents = components.filter(isHistoricalComponent);
   // If the data came from mock fixtures it won't have a UUID id — detect that to disable mutations
   const isBackendData = !!model.workspace_id;
 
@@ -73,29 +75,91 @@ export default function ModelDetail() {
           </p>
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {components.map((c) => (
-            <ComponentCard
-              key={c.id}
-              id={c.id}
-              name={c.name}
-              value={c.value}
-              confidence={c.confidence}
-              freshness={c.freshness}
-              last_verified_at={c.last_verified_at}
-              sources={c.sources}
-              authority_source={c.authority_source}
+        <div className="space-y-8">
+          {activeComponents.length > 0 && (
+            <div className="space-y-4">
+              {historicalComponents.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Current components
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Active facts stay in the main model view. Superseded facts are separated below.
+                  </p>
+                </div>
+              )}
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {activeComponents.map((c) => (
+                  <ComponentCard
+                    key={c.id}
+                    id={c.id}
+                    name={c.name}
+                    value={c.value}
+                    confidence={c.confidence}
+                    freshness={c.freshness}
+                    last_verified_at={c.last_verified_at}
+                    sources={c.sources}
+                    sourceDocuments={c.sourceDocuments ?? c.source_documents}
+                    authority_source={c.authority_source}
+              reviewStatus={c.reviewStatus ?? c.review_status}
+              reviewSummary={c.reviewSummary ?? c.review_summary}
+              temporalState={c.temporalState ?? c.temporal_state}
+              reviewItemId={c.reviewItemId ?? c.review_item_id}
               onUpdate={isBackendData ? (body, opts) => updateMut.mutate(body, opts) : undefined}
-              onDelete={isBackendData ? (compId, opts) => deleteMut.mutate(compId, opts) : undefined}
-              updatePending={updateMut.isPending}
-              deletePending={deleteMut.isPending}
-              mutationError={
-                (updateMut.isError ? updateMut.error?.message : null) ||
-                (deleteMut.isError ? deleteMut.error?.message : null) ||
-                null
-              }
-            />
-          ))}
+                    onDelete={isBackendData ? (compId, opts) => deleteMut.mutate(compId, opts) : undefined}
+                    updatePending={updateMut.isPending}
+                    deletePending={deleteMut.isPending}
+                    mutationError={
+                      (updateMut.isError ? updateMut.error?.message : null) ||
+                      (deleteMut.isError ? deleteMut.error?.message : null) ||
+                      null
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {historicalComponents.length > 0 && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Historical context
+                </h3>
+                <p className="mt-1 text-xs text-gray-400">
+                  Older or superseded facts stay visible for time-travel context, but they are separated from current truth.
+                </p>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {historicalComponents.map((c) => (
+                  <ComponentCard
+                    key={c.id}
+                    id={c.id}
+                    name={c.name}
+                    value={c.value}
+                    confidence={c.confidence}
+                    freshness={c.freshness}
+                    last_verified_at={c.last_verified_at}
+                    sources={c.sources}
+                    sourceDocuments={c.sourceDocuments ?? c.source_documents}
+                    authority_source={c.authority_source}
+                    reviewStatus={c.reviewStatus ?? c.review_status}
+                    reviewSummary={c.reviewSummary ?? c.review_summary}
+                    temporalState={c.temporalState ?? c.temporal_state}
+                    onUpdate={isBackendData ? (body, opts) => updateMut.mutate(body, opts) : undefined}
+                    onDelete={isBackendData ? (compId, opts) => deleteMut.mutate(compId, opts) : undefined}
+                    updatePending={updateMut.isPending}
+                    deletePending={deleteMut.isPending}
+                    mutationError={
+                      (updateMut.isError ? updateMut.error?.message : null) ||
+                      (deleteMut.isError ? deleteMut.error?.message : null) ||
+                      null
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -103,6 +167,16 @@ export default function ModelDetail() {
       <RelationshipsPanel modelId={modelId} components={components} isBackendData={isBackendData} />
     </div>
   );
+}
+
+function isHistoricalComponent(component) {
+  const temporalState = normalizeValue(component?.temporalState ?? component?.temporal_state);
+  const reviewStatus = normalizeValue(component?.reviewStatus ?? component?.review_status);
+  return temporalState === "historical" || temporalState === "superseded" || reviewStatus === "superseded";
+}
+
+function normalizeValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
 }
 
 function AddComponentForm({ modelId, onClose }) {

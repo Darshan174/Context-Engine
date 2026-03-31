@@ -41,6 +41,12 @@ class QuerySourceRead(BaseModel):
     url: str | None = None
 
 
+class QuerySourceDocumentRead(BaseModel):
+    id: UUID
+    label: str
+    connector_type: str
+
+
 class QueryComponentRead(BaseModel):
     id: UUID
     model: str
@@ -49,6 +55,14 @@ class QueryComponentRead(BaseModel):
     confidence: float
     authority_source: str | None = None
     last_verified_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    superseded_by: UUID | None = None
+    review_status: str | None = None
+    review_summary: str | None = None
+    review_item_id: UUID | None = None
+    temporal_state: str | None = None
+    source_documents: list[QuerySourceDocumentRead] = []
 
 
 class QueryResult(BaseModel):

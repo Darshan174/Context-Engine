@@ -124,6 +124,12 @@ async def engine():
                 "('positive', 'negative', 'neutral')"
             )
         )
+        await conn.execute(
+            text(
+                "CREATE TYPE sync_job_status_enum AS ENUM "
+                "('pending', 'running', 'completed', 'failed')"
+            )
+        )
 
     # Now create_all on a fresh connection — it will skip enum creation
     # (checkfirst=True by default) and use the ones we just made.

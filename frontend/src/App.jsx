@@ -1,22 +1,26 @@
 import { useState } from "react";
 import { Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
+import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
 import Models from "./pages/Models";
 import Connectors from "./pages/Connectors";
+import ConnectorRuns from "./pages/ConnectorRuns";
 import KnowledgeGraph from "./pages/KnowledgeGraph";
 import ModelDetail from "./pages/ModelDetail";
 import Query from "./pages/Query";
+import ReviewQueue from "./pages/ReviewQueue";
 import Sources from "./pages/Sources";
 import WorkspaceBootstrap from "./components/WorkspaceBootstrap";
 import WorkspaceSwitcher from "./components/WorkspaceSwitcher";
 
-const NAV = [
-  { to: "/", label: "Dashboard", icon: BarChartIcon },
-  { to: "/models", label: "Models", icon: CubeIcon },
-  { to: "/query", label: "Query", icon: SearchIcon },
-  { to: "/connectors", label: "Connectors", icon: PlugIcon },
-  { to: "/sources", label: "Sources", icon: DocumentStackIcon },
-  { to: "/graph", label: "Knowledge Graph", icon: GraphIcon },
+const ADMIN_NAV = [
+  { to: "/app", label: "Dashboard", icon: BarChartIcon },
+  { to: "/app/models", label: "Models", icon: CubeIcon },
+  { to: "/app/query", label: "Query", icon: SearchIcon },
+  { to: "/app/review", label: "Review Queue", icon: ShieldCheckIcon },
+  { to: "/app/connectors", label: "Connectors", icon: PlugIcon },
+  { to: "/app/sources", label: "Sources", icon: DocumentStackIcon },
+  { to: "/app/graph", label: "Knowledge Graph", icon: GraphIcon },
 ];
 
 function SidebarContent({ onNavigate }) {
@@ -32,11 +36,11 @@ function SidebarContent({ onNavigate }) {
       </div>
 
       <nav className="flex-1 py-4 space-y-1 px-3">
-        {NAV.map(({ to, label, icon: Icon }) => (
+        {ADMIN_NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
-            end={to === "/"}
+            end={to === "/app"}
             onClick={onNavigate}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
@@ -60,17 +64,27 @@ function SidebarContent({ onNavigate }) {
 }
 
 export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Landing />} />
+      <Route path="/app/*" element={<AdminShell />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function AdminShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const location = useLocation();
 
   let pageTitle;
-  const modelMatch = location.pathname.match(/^\/model\/(.+)/);
+  const modelMatch = location.pathname.match(/^\/app\/model\/(.+)/);
   if (modelMatch) {
     pageTitle = "Model Detail";
   } else {
     pageTitle =
-      NAV.find((n) =>
-        n.to === "/" ? location.pathname === "/" : location.pathname.startsWith(n.to),
+      ADMIN_NAV.find((n) =>
+        n.to === "/app" ? location.pathname === "/app" : location.pathname.startsWith(n.to),
       )?.label ?? "Admin Dashboard";
   }
 
@@ -117,14 +131,18 @@ export default function App() {
 
           <main className="flex-1 overflow-y-auto p-6 bg-gray-50">
             <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/models" element={<Models />} />
-              <Route path="/query" element={<Query />} />
-              <Route path="/connectors" element={<Connectors />} />
-              <Route path="/sources" element={<Sources />} />
-              <Route path="/graph" element={<KnowledgeGraph />} />
-              <Route path="/model/:modelId" element={<ModelDetail />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route index element={<Dashboard />} />
+              <Route path="models" element={<Models />} />
+              <Route path="query" element={<Query />} />
+              <Route path="review" element={<ReviewQueue />} />
+              <Route path="review/:itemId" element={<ReviewQueue />} />
+              <Route path="connectors" element={<Connectors />} />
+              <Route path="connectors/:connectorType/runs" element={<ConnectorRuns />} />
+              <Route path="sources" element={<Sources />} />
+              <Route path="sources/:documentId" element={<Sources />} />
+              <Route path="graph" element={<KnowledgeGraph />} />
+              <Route path="model/:modelId" element={<ModelDetail />} />
+              <Route path="*" element={<Navigate to="/app" replace />} />
             </Routes>
           </main>
         </div>
@@ -166,6 +184,15 @@ function SearchIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+    </svg>
+  );
+}
+
+function ShieldCheckIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4" />
     </svg>
   );
 }

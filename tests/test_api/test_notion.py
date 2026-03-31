@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import select
 
 import app.services.connector_service as connector_module
+import app.services.sync_service as sync_module
 from app.connectors.base import AuthenticationError, NormalizedDocument
 from app.connectors.notion import (
     NotionConnector,
@@ -18,6 +19,7 @@ from app.connectors.notion import (
 from app.models.connector import Connector, ConnectorStatus, SyncState
 from app.models.source import ConnectorType, SourceDocument
 from app.services.connector_service import ConnectorService, SyncError
+from app.services.sync_service import SyncExecutor, SyncError as SyncExecutorError
 from app.utils.crypto import encrypt_token
 
 from cryptography.fernet import Fernet
@@ -204,24 +206,24 @@ class TestNotionNormalizedDocumentMapping:
 
 class TestNotionConnectorResolution:
     def test_resolve_returns_notion_connector(self):
-        svc = ConnectorService.__new__(ConnectorService)
-        connector = svc._resolve_connector(ConnectorType.NOTION, "ntn_test_token")
+        executor = SyncExecutor.__new__(SyncExecutor)
+        connector = executor._resolve_connector(ConnectorType.NOTION, "ntn_test_token")
         assert isinstance(connector, NotionConnector)
 
     def test_resolve_still_returns_slack_connector(self):
         """Slack resolution is unchanged."""
         from app.connectors.slack import SlackConnector
 
-        svc = ConnectorService.__new__(ConnectorService)
-        connector = svc._resolve_connector(ConnectorType.SLACK, "xoxb-test")
+        executor = SyncExecutor.__new__(SyncExecutor)
+        connector = executor._resolve_connector(ConnectorType.SLACK, "xoxb-test")
         assert isinstance(connector, SlackConnector)
 
     def test_resolve_unknown_type_raises(self):
         import pytest
 
-        svc = ConnectorService.__new__(ConnectorService)
-        with pytest.raises(SyncError, match="No connector implementation"):
-            svc._resolve_connector(ConnectorType.GDRIVE, "token")
+        executor = SyncExecutor.__new__(SyncExecutor)
+        with pytest.raises(SyncExecutorError, match="No connector implementation"):
+            executor._resolve_connector(ConnectorType.GDRIVE, "token")
 
 
 # ── End-to-end: sync persists SourceDocuments ─────────────────────────
@@ -244,7 +246,7 @@ class TestNotionSync:
         )
 
     async def test_notion_sync_persists_source_documents(
-        self, client, workspace, db_session, monkeypatch
+        self, workspace, db_session, monkeypatch
     ):
         """Notion sync end-to-end: dlt resource → NormalizedDocument → SourceDocument."""
         self._setup(monkeypatch)
@@ -276,15 +278,12 @@ class TestNotionSync:
         mock_connector = AsyncMock()
         mock_connector.fetch_initial = lambda: _mock_notion_fetch(sample_docs)
         monkeypatch.setattr(
-            connector_module.ConnectorService,
+            sync_module.SyncExecutor,
             "_resolve_connector",
             lambda self, ct, tok: mock_connector,
         )
 
-        resp = await client.post(f"/api/connectors/{conn_id}/sync")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "processed" in body["message"]
+        await SyncExecutor(db_session).run(conn, "ntn_test_token")
 
         db_session.expire_all()
         docs = list(await db_session.scalars(
@@ -298,7 +297,7 @@ class TestNotionSync:
         assert all(d.processed_at is not None for d in docs)
 
     async def test_notion_sync_dedupes_on_connector_and_external_id(
-        self, client, workspace, db_session, monkeypatch
+        self, workspace, db_session, monkeypatch
     ):
         """Re-syncing the same pages doesn't duplicate SourceDocuments."""
         self._setup(monkeypatch)
@@ -321,21 +320,17 @@ class TestNotionSync:
         mock_connector = AsyncMock()
         mock_connector.fetch_initial = lambda: _mock_notion_fetch(sample_docs)
         monkeypatch.setattr(
-            connector_module.ConnectorService,
+            sync_module.SyncExecutor,
             "_resolve_connector",
             lambda self, ct, tok: mock_connector,
         )
 
-        # First sync
-        resp = await client.post(f"/api/connectors/{conn_id}/sync")
-        assert resp.status_code == 200
+        # First sync (initial)
+        await SyncExecutor(db_session).run(conn, "ntn_test_token")
 
         # Second sync (incremental path, same doc)
-        mock_connector.fetch_incremental = lambda cursor=None: _mock_notion_fetch(
-            sample_docs
-        )
-        resp = await client.post(f"/api/connectors/{conn_id}/sync")
-        assert resp.status_code == 200
+        mock_connector.fetch_incremental = lambda cursor=None: _mock_notion_fetch(sample_docs)
+        await SyncExecutor(db_session).run(conn, "ntn_test_token")
 
         db_session.expire_all()
         docs = list(await db_session.scalars(
@@ -346,7 +341,7 @@ class TestNotionSync:
         assert len(docs) == 1
 
     async def test_notion_sync_creates_sync_state(
-        self, client, workspace, db_session, monkeypatch
+        self, workspace, db_session, monkeypatch
     ):
         """SyncState row is created for the Notion connector."""
         self._setup(monkeypatch)
@@ -367,12 +362,12 @@ class TestNotionSync:
             ),
         ])
         monkeypatch.setattr(
-            connector_module.ConnectorService,
+            sync_module.SyncExecutor,
             "_resolve_connector",
             lambda self, ct, tok: mock_connector,
         )
 
-        await client.post(f"/api/connectors/{conn_id}/sync")
+        await SyncExecutor(db_session).run(conn, "ntn_test_token")
 
         db_session.expire_all()
         ss = await db_session.scalar(

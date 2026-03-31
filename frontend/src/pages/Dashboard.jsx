@@ -1,15 +1,23 @@
 import { Link } from "react-router-dom";
-import { useDashboard } from "../api/hooks";
+import {
+  useConnectorProcessingSummary,
+  useConnectors,
+  useDashboard,
+  useReviewQueue,
+} from "../api/hooks";
 import StatusView from "../components/StatusView";
 
 const DESTINATIONS = {
-  Sources: "/sources",
-  Models: "/models",
-  Relationships: "/graph",
+  Sources: "/app/sources",
+  Models: "/app/models",
+  Relationships: "/app/graph",
 };
 
 export default function Dashboard() {
   const query = useDashboard();
+  const reviewQuery = useReviewQueue();
+  const connectorsQuery = useConnectors();
+  const processingQuery = useConnectorProcessingSummary();
 
   if (query.isLoading || query.isError) {
     return (
@@ -20,7 +28,21 @@ export default function Dashboard() {
   }
 
   const { stats = [], activity = [], alerts = [] } = query.data;
+  const reviewItems = reviewQuery.data ?? [];
   const isEmpty = stats.length > 0 && stats.every((s) => s.value === 0);
+  const needsReviewCount = reviewItems.filter((item) => item.status === "needs_review").length;
+  const conflictCount = reviewItems.filter((item) => item.kind === "conflict").length;
+  const historicalCount = reviewItems.filter((item) => item.status === "superseded").length;
+  const connectors = (connectorsQuery.data ?? []).filter((connector) => connector.availability === "available");
+  const processingByType = new Map(
+    (processingQuery.data?.items ?? []).map((item) => [item.connectorType, item]),
+  );
+  const connectorErrors = connectors.filter((connector) => connector.status === "error").length;
+  const queuedConnectors = connectors.filter((connector) => connector.syncQueuedAt).length;
+  const pendingExtraction = Array.from(processingByType.values()).reduce(
+    (total, item) => total + Number(item.unprocessedDocuments ?? 0),
+    0,
+  );
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -36,7 +58,7 @@ export default function Dashboard() {
         {stats.map((s) => (
           <Link
             key={s.label}
-            to={DESTINATIONS[s.label] ?? "/query"}
+            to={DESTINATIONS[s.label] ?? "/app/query"}
             className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-sm transition-shadow block"
           >
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{s.label}</p>
@@ -51,7 +73,7 @@ export default function Dashboard() {
           <p className="text-sm font-medium text-brand-800">Your workspace is empty</p>
           <p className="text-xs text-brand-600 mt-1">
             Head to{" "}
-            <Link to="/models" className="underline font-medium">
+            <Link to="/app/models" className="underline font-medium">
               Models
             </Link>{" "}
             to create your first model and start adding components.
@@ -64,11 +86,99 @@ export default function Dashboard() {
           <p className="text-xs text-emerald-700 mt-1">
             Synced connector documents are stored and ready for extraction and query.
           </p>
-          <Link to="/sources" className="inline-flex mt-3 text-xs font-medium text-emerald-800 underline">
+          <Link to="/app/sources" className="inline-flex mt-3 text-xs font-medium text-emerald-800 underline">
             Inspect source documents
           </Link>
         </div>
       )}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Trust Status</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Review pressure, contradictions, and historical context that may affect downstream answers.
+            </p>
+          </div>
+          <Link to="/app/review" className="text-xs font-medium text-brand-700 hover:text-brand-800">
+            Open review queue
+          </Link>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <TrustCard
+            label="Needs review"
+            value={needsReviewCount}
+            tone="amber"
+            to="/app/review?status=needs_review"
+          />
+          <TrustCard
+            label="Conflicts"
+            value={conflictCount}
+            tone="red"
+            to="/app/review?kind=conflict"
+          />
+          <TrustCard
+            label="Historical facts"
+            value={historicalCount}
+            tone="slate"
+            to="/app/review?status=superseded"
+          />
+        </div>
+        {needsReviewCount > 0 && (
+          <p className="mt-4 text-xs text-amber-700">
+            Review attention is needed before low-confidence or conflicting facts become default operating context.
+          </p>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Pipeline Status</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Connector health, queued syncs, and extraction pressure across the workspace.
+            </p>
+          </div>
+          <Link to="/app/connectors" className="text-xs font-medium text-brand-700 hover:text-brand-800">
+            Open connectors
+          </Link>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <TrustCard
+            label="Queued syncs"
+            value={queuedConnectors}
+            tone="slate"
+            to="/app/connectors"
+          />
+          <TrustCard
+            label="Connector errors"
+            value={connectorErrors}
+            tone={connectorErrors > 0 ? "red" : "slate"}
+            to="/app/connectors"
+          />
+          <TrustCard
+            label="Pending extraction"
+            value={pendingExtraction}
+            tone={pendingExtraction > 0 ? "amber" : "slate"}
+            to="/app/sources?processed=unprocessed"
+          />
+        </div>
+        {connectors.length > 0 ? (
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {connectors.map((connector) => (
+              <PipelineCard
+                key={connector.type}
+                connector={connector}
+                processing={processingByType.get(connector.type) ?? null}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-gray-400">
+            No live connectors are configured yet.
+          </p>
+        )}
+      </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* ── Recent activity ────────────────────── */}
@@ -114,6 +224,110 @@ export default function Dashboard() {
             </ul>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TrustCard({ label, value, tone, to }) {
+  const toneClasses = {
+    amber: "bg-amber-50 border-amber-200 text-amber-800",
+    red: "bg-red-50 border-red-200 text-red-800",
+    slate: "bg-slate-50 border-slate-200 text-slate-700",
+  };
+
+  return (
+    <Link
+      to={to ?? "/app/review"}
+      className={`rounded-xl border px-4 py-3 block hover:shadow-sm transition-shadow ${toneClasses[tone] ?? toneClasses.slate}`}
+    >
+      <p className="text-[11px] uppercase tracking-wide opacity-80">{label}</p>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
+    </Link>
+  );
+}
+
+function PipelineCard({ connector, processing }) {
+  const pending = Number(processing?.unprocessedDocuments ?? 0);
+  const processed = Number(processing?.processedDocuments ?? connector.totalProcessedCount ?? 0);
+  const total = Number(processing?.totalDocuments ?? connector.itemsSynced ?? 0);
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-gray-800">{connector.name}</p>
+            {connector.providerLabel && (
+              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600 border border-gray-200">
+                {connector.providerLabel}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-gray-500">{connector.description}</p>
+        </div>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+            connector.status === "connected"
+              ? "bg-emerald-100 text-emerald-700"
+              : connector.status === "error"
+                ? "bg-red-100 text-red-700"
+                : "bg-gray-100 text-gray-600"
+          }`}
+        >
+          {connector.status}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-y-2 text-xs">
+        <span className="text-gray-400">Last sync</span>
+        <span className="text-right text-gray-700">{connector.lastSync}</span>
+        <span className="text-gray-400">Stored docs</span>
+        <span className="text-right text-gray-700">{total.toLocaleString()}</span>
+        <span className="text-gray-400">Processed</span>
+        <span className="text-right text-gray-700">{processed.toLocaleString()}</span>
+        <span className="text-gray-400">Pending</span>
+        <span className="text-right text-gray-700">{pending.toLocaleString()}</span>
+      </div>
+
+      {connector.syncQueuedAt && (
+        <p className="mt-3 text-[11px] text-blue-700">
+          Sync queued {connector.syncQueuedAt}.
+        </p>
+      )}
+      {!connector.syncQueuedAt && connector.status === "connected" && pending > 0 && (
+        <p className="mt-3 text-[11px] text-amber-700">
+          Extraction is still pending for {pending.toLocaleString()} source document{pending === 1 ? "" : "s"}.
+        </p>
+      )}
+      {connector.status === "error" && (
+        <p className="mt-3 text-[11px] text-red-700">
+          This connector needs attention before new source data can be trusted.
+        </p>
+      )}
+      {connector.status === "disconnected" && (
+        <p className="mt-3 text-[11px] text-gray-500">
+          Connect this source to start ingesting raw context into the workspace.
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap gap-3 text-xs">
+        <Link to="/app/connectors" className="font-medium text-brand-700 hover:text-brand-800">
+          Open connector
+        </Link>
+        {connector.connectorId && (
+          <Link
+            to={`/app/connectors/${connector.type}/runs`}
+            className="font-medium text-brand-700 hover:text-brand-800"
+          >
+            Run history
+          </Link>
+        )}
+        {total > 0 && (
+          <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+            Sources
+          </Link>
+        )}
       </div>
     </div>
   );

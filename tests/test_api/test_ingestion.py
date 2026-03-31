@@ -3,38 +3,22 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
 
-import app.services.connector_service as connector_module
-from app.connectors.base import NormalizedDocument
-from app.models.connector import Connector, ConnectorStatus, SyncState
-from app.models.knowledge import Component, ComponentSource, KnowledgeModel
+from app.models.connector import Connector, ConnectorStatus
+from app.models.knowledge import (
+    Component,
+    ComponentSource,
+    KnowledgeModel,
+    Relationship,
+    RelationshipType,
+)
+from app.models.review import ReviewItem
 from app.models.source import ConnectorType, SourceDocument
 from app.services.ingestion_service import IngestionService
-from app.utils.crypto import encrypt_token
-
-from cryptography.fernet import Fernet
-
-_TEST_FERNET_KEY = Fernet.generate_key().decode()
-
-
-def _make_connected_slack(workspace, encrypted_token):
-    return Connector(
-        workspace_id=workspace.id,
-        connector_type=ConnectorType.SLACK,
-        status=ConnectorStatus.CONNECTED,
-        oauth_token_encrypted=encrypted_token,
-        config={"team_name": "Test"},
-    )
-
-
-async def _mock_fetch_initial_yielding(docs):
-    for d in docs:
-        yield d
 
 
 @pytest.fixture
@@ -219,10 +203,10 @@ class TestIngestionServiceDirect:
         )
         assert count2 == 0
 
-    async def test_component_upsert_updates_existing(
+    async def test_same_fact_value_reuses_existing_component(
         self, db_session, workspace, slack_connector
     ):
-        """If the same fact name is extracted again, the component is updated not duplicated."""
+        """If the same fact value is extracted again, reuse the active component version."""
         doc1 = SourceDocument(
             connector_id=slack_connector.id,
             connector_type=ConnectorType.SLACK,
@@ -234,7 +218,7 @@ class TestIngestionServiceDirect:
             connector_id=slack_connector.id,
             connector_type=ConnectorType.SLACK,
             external_id="C1:upsert.2",
-            content="decision: launch Tuesday instead",
+            content="decision: launch Monday",
             metadata_json={"channel_name": "product"},
         )
         db_session.add_all([doc1, doc2])
@@ -248,15 +232,13 @@ class TestIngestionServiceDirect:
         )
         assert count == 2
 
-        # Only one component named "Decision in #product"
         components = list(await db_session.scalars(
             select(Component).where(Component.name == "Decision in #product")
         ))
         assert len(components) == 1
-        # Value updated to the later doc's extraction
-        assert "Tuesday" in components[0].value
+        assert components[0].value == "launch Monday"
+        assert components[0].valid_to is None
 
-        # But both source docs are linked
         links = list(await db_session.scalars(
             select(ComponentSource).where(
                 ComponentSource.component_id == components[0].id
@@ -440,64 +422,185 @@ class TestIngestionServiceDirect:
         names = {m.name for m in models}
         assert names == {"Slack Insights", "Notion Insights"}
 
-
-# ── End-to-end: sync triggers ingestion ──────────────────────────
-
-
-class TestSyncTriggersIngestion:
-    """Verify that queue_sync → _persist_documents → IngestionService
-    runs end-to-end through the API."""
-
-    def _setup(self, monkeypatch):
-        monkeypatch.setattr(
-            connector_module.settings, "encryption_key", _TEST_FERNET_KEY
-        )
-
-    async def test_sync_processes_documents_into_knowledge_graph(
-        self, client, workspace, db_session, monkeypatch
+    async def test_low_confidence_fact_creates_review_item(
+        self, db_session, workspace, slack_connector
     ):
-        self._setup(monkeypatch)
-        token_enc = encrypt_token("xoxb-test")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
+        doc = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:lowconf.1",
+            content="This still needs discussion\n\nThread replies:\nBob: agreed",
+            author="Alice",
+            metadata_json={"channel_name": "strategy", "reply_count": 1},
+        )
+        db_session.add(doc)
         await db_session.flush()
 
-        sample_docs = [
-            NormalizedDocument(
-                external_id="C1:e2e.1",
-                content="decision: adopt Kubernetes",
-                author="DevOps Lead",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "infra"},
-            ),
-            NormalizedDocument(
-                external_id="C1:e2e.2",
-                content="blocker: need budget approval for K8s cluster",
-                author="VP Eng",
-                created_at=datetime(2026, 3, 29, 11, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "infra"},
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(
-            sample_docs
-        )
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
+        svc = IngestionService(db_session)
+        await svc.process_connector_documents(
+            workspace_id=workspace.id,
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
         )
 
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "processed" in body["message"]
+        component = await db_session.scalar(
+            select(Component).where(Component.name == "Discussion in #strategy")
+        )
+        assert component is not None
+        review_item = await db_session.scalar(
+            select(ReviewItem).where(ReviewItem.component_id == component.id)
+        )
+        assert review_item is not None
+        assert review_item.status == "needs_review"
+        assert review_item.kind == "low_confidence"
+        assert review_item.severity == "medium"
 
-        await db_session.refresh(conn)
-        assert conn.config.get("processed_count", 0) > 0
+    async def test_conflicting_fact_creates_new_version_and_review_items(
+        self, db_session, workspace, slack_connector
+    ):
+        doc1 = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:conflict.1",
+            content="decision: launch Monday",
+            metadata_json={"channel_name": "product"},
+            ingested_at=datetime(2026, 3, 29, 9, 0, tzinfo=timezone.utc),
+        )
+        doc2 = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:conflict.2",
+            content="decision: launch Tuesday",
+            metadata_json={"channel_name": "product"},
+            ingested_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
+        )
+        db_session.add_all([doc1, doc2])
+        await db_session.flush()
 
-        # Knowledge model auto-created
+        svc = IngestionService(db_session)
+        await svc.process_connector_documents(
+            workspace_id=workspace.id,
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+        )
+
+        components = list(await db_session.scalars(
+            select(Component)
+            .where(Component.name == "Decision in #product")
+            .order_by(Component.valid_from.asc(), Component.id.asc())
+        ))
+        assert len(components) == 2
+
+        old_component = next(c for c in components if "Monday" in c.value)
+        new_component = next(c for c in components if "Tuesday" in c.value)
+
+        assert old_component.valid_to is not None
+        assert old_component.superseded_by == new_component.id
+        assert new_component.valid_to is None
+
+        old_review = await db_session.scalar(
+            select(ReviewItem).where(ReviewItem.component_id == old_component.id)
+        )
+        new_review = await db_session.scalar(
+            select(ReviewItem).where(ReviewItem.component_id == new_component.id)
+        )
+        assert old_review is not None
+        assert old_review.status == "superseded"
+        assert old_review.kind == "superseded_fact"
+        assert new_review is not None
+        assert new_review.status == "needs_review"
+        assert new_review.kind == "conflict"
+
+        supersedes_rel = await db_session.scalar(
+            select(Relationship).where(
+                Relationship.source_component_id == new_component.id,
+                Relationship.target_component_id == old_component.id,
+                Relationship.relationship_type == RelationshipType.SUPERSEDES,
+            )
+        )
+        assert supersedes_rel is not None
+
+    async def test_reprocess_retires_removed_fact_and_cleans_source_link(
+        self, db_session, workspace, slack_connector
+    ):
+        doc = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:reprocess.1",
+            content="decision: launch Monday\nblocker: need audit approval",
+            metadata_json={"channel_name": "product"},
+        )
+        db_session.add(doc)
+        await db_session.flush()
+
+        svc = IngestionService(db_session)
+        await svc.process_connector_documents(
+            workspace_id=workspace.id,
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+        )
+
+        blocker = await db_session.scalar(
+            select(Component).where(
+                Component.name == "Blocker in #product",
+                Component.valid_to.is_(None),
+            )
+        )
+        assert blocker is not None
+
+        doc.content = "decision: launch Monday"
+        doc.processed_at = None
+        await db_session.flush()
+
+        processed = await svc.process_single_document(
+            workspace_id=workspace.id,
+            document=doc,
+            connector_type=ConnectorType.SLACK,
+        )
+        assert processed == 1
+
+        await db_session.refresh(blocker)
+        assert blocker.valid_to is not None
+
+        blocker_links = list(await db_session.scalars(
+            select(ComponentSource).where(ComponentSource.component_id == blocker.id)
+        ))
+        assert blocker_links == []
+
+        blocker_review = await db_session.scalar(
+            select(ReviewItem).where(ReviewItem.component_id == blocker.id)
+        )
+        assert blocker_review is not None
+        assert blocker_review.status == "superseded"
+
+    async def test_reprocess_retires_relationships_for_removed_fact(
+        self, db_session, workspace, slack_connector
+    ):
+        doc = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:reprocess.relationship.1",
+            content="blocker: need audit approval",
+            metadata_json={"channel_name": "product"},
+        )
+        db_session.add(doc)
+        await db_session.flush()
+
+        svc = IngestionService(db_session)
+        await svc.process_connector_documents(
+            workspace_id=workspace.id,
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+        )
+
+        blocker = await db_session.scalar(
+            select(Component).where(
+                Component.name == "Blocker in #product",
+                Component.valid_to.is_(None),
+            )
+        )
+        assert blocker is not None
+
         model = await db_session.scalar(
             select(KnowledgeModel).where(
                 KnowledgeModel.workspace_id == workspace.id,
@@ -506,75 +609,36 @@ class TestSyncTriggersIngestion:
         )
         assert model is not None
 
-        # Components extracted
-        components = list(await db_session.scalars(
-            select(Component).where(Component.model_id == model.id)
-        ))
-        assert len(components) >= 2
-
-        # Source documents scoped to this connector and processed
-        docs = list(await db_session.scalars(
-            select(SourceDocument).where(
-                SourceDocument.connector_id == conn.id,
-                SourceDocument.processed_at.is_not(None),
-            )
-        ))
-        assert len(docs) == 2
-
-    async def test_second_sync_only_processes_new_documents(
-        self, client, workspace, db_session, monkeypatch
-    ):
-        self._setup(monkeypatch)
-        token_enc = encrypt_token("xoxb-test")
-        conn = _make_connected_slack(workspace, token_enc)
-        db_session.add(conn)
+        dependency = Component(
+            model_id=model.id,
+            name="Audit Review",
+            value="Security sign-off",
+            confidence=0.95,
+        )
+        db_session.add(dependency)
         await db_session.flush()
 
-        batch1 = [
-            NormalizedDocument(
-                external_id="C1:batch.1",
-                content="decision: use Redis for caching",
-                author="U1",
-                created_at=datetime(2026, 3, 29, 10, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "backend"},
-            ),
-        ]
-
-        mock_connector = AsyncMock()
-        mock_connector.fetch_initial = lambda: _mock_fetch_initial_yielding(batch1)
-        monkeypatch.setattr(
-            connector_module.ConnectorService,
-            "_resolve_connector",
-            lambda self, ct, tok: mock_connector,
+        relationship = Relationship(
+            source_component_id=blocker.id,
+            target_component_id=dependency.id,
+            relationship_type=RelationshipType.BLOCKED_BY,
+            confidence=0.9,
+            description="Audit approval is required before the blocker clears.",
         )
+        db_session.add(relationship)
+        await db_session.flush()
 
-        # First sync
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
+        doc.content = "decision: blocker resolved"
+        doc.processed_at = None
+        await db_session.flush()
 
-        # Second sync with one new doc
-        batch2 = [
-            NormalizedDocument(
-                external_id="C1:batch.2",
-                content="action item: benchmark Redis vs Memcached",
-                author="U2",
-                created_at=datetime(2026, 3, 30, 8, 0, tzinfo=timezone.utc),
-                metadata={"channel_name": "backend"},
-            ),
-        ]
-        mock_connector.fetch_incremental = lambda cursor=None: (
-            _mock_fetch_initial_yielding(batch2)
+        processed = await svc.process_single_document(
+            workspace_id=workspace.id,
+            document=doc,
+            connector_type=ConnectorType.SLACK,
         )
+        assert processed == 1
 
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
-        assert resp.status_code == 200
-
-        await db_session.refresh(conn)
-        # Only the new doc was processed in the second sync
-        assert conn.config["processed_count"] == 1
-
-        # Total components: decision + action item
-        comp_count = await db_session.scalar(
-            select(func.count()).select_from(Component)
-        )
-        assert comp_count == 2
+        await db_session.refresh(relationship)
+        assert relationship.valid_to is not None
+        assert relationship.temporal_state == "historical"

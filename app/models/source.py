@@ -80,3 +80,15 @@ class SourceDocument(UUIDPrimaryKeyMixin, Base):
         back_populates="source_documents",
         viewonly=True,
     )
+
+    @property
+    def label(self) -> str:
+        metadata = self.metadata_json or {}
+        return (
+            metadata.get("location")
+            or metadata.get("channel_name")
+            or metadata.get("page_title")
+            or metadata.get("page_id")
+            or self.author
+            or self.external_id
+        )

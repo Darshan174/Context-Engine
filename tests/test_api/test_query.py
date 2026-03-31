@@ -12,6 +12,7 @@ from app.models import (
     Relationship,
     RelationshipSentiment,
     RelationshipType,
+    ReviewItem,
     SourceDocument,
 )
 
@@ -418,7 +419,118 @@ class TestQueryAPI:
         )
 
         assert resp.status_code == 200
+
+    async def test_query_ignores_historical_component_versions(
+        self, client, db_session, workspace
+    ):
+        pricing = await _create_model(db_session, workspace.id, "Pricing", "Pricing information")
+        old_component = await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Plan",
+            value="$500/seat",
+            confidence=0.9,
+            last_verified_at=datetime.now(UTC) - timedelta(days=2),
+        )
+        new_component = await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Plan",
+            value="$600/seat",
+            confidence=0.86,
+            last_verified_at=datetime.now(UTC) - timedelta(days=1),
+        )
+        old_component.valid_to = datetime.now(UTC) - timedelta(hours=12)
+        old_component.superseded_by_id = new_component.id
+        db_session.add(
+            ReviewItem(
+                component_id=old_component.id,
+                status="superseded",
+                severity="low",
+                kind="superseded_fact",
+                title="Enterprise Plan is now historical",
+                summary="A newer enterprise plan superseded this value.",
+                confidence=old_component.confidence,
+            )
+        )
+        await db_session.flush()
+
+        resp = await client.post(
+            "/api/query",
+            json={
+                "question": "What is the enterprise plan price?",
+                "workspace_id": str(workspace.id),
+            },
+        )
+
+        assert resp.status_code == 200
         body = resp.json()
-        assert len(body["components"]) == 1
-        assert body["components"][0]["name"] == "Pro Plan"
-        assert body["answer"].count("Pro Plan") == 1
+        assert body["components"]
+        assert body["components"][0]["value"] == "$600/seat"
+        assert all(component["value"] != "$500/seat" for component in body["components"])
+
+    async def test_query_returns_review_metadata_and_source_documents(
+        self, client, db_session, workspace
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.SLACK,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        roadmap = await _create_model(db_session, workspace.id, "Roadmap", "Roadmap work")
+        component = await _create_component(
+            db_session,
+            model_id=roadmap.id,
+            name="SSO Launch Target",
+            value="Q3",
+            confidence=0.55,
+            last_verified_at=datetime.now(UTC),
+        )
+        db_session.add(
+            ReviewItem(
+                component_id=component.id,
+                status="needs_review",
+                severity="medium",
+                kind="low_confidence",
+                title="SSO Launch Target extracted with low confidence",
+                summary="The roadmap target still needs human confirmation.",
+                confidence=0.55,
+            )
+        )
+        await db_session.flush()
+
+        await _link_source(
+            db_session,
+            component_id=component.id,
+            connector_id=conn.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="slack-roadmap-1",
+            author="PM",
+            url="https://slack.example.com/roadmap",
+            content="decision: SSO launches in Q3.",
+            created_at_source=datetime.now(UTC),
+        )
+
+        resp = await client.post(
+            "/api/query",
+            json={
+                "question": "What is the SSO launch target?",
+                "workspace_id": str(workspace.id),
+            },
+        )
+
+        assert resp.status_code == 200
+        component_body = resp.json()["components"][0]
+        assert component_body["review_status"] == "needs_review"
+        assert component_body["review_summary"] == "The roadmap target still needs human confirmation."
+        assert component_body["review_item_id"] is not None
+        assert component_body["valid_from"] is not None
+        assert component_body["valid_to"] is None
+        assert component_body["superseded_by"] is None
+        assert component_body["temporal_state"] is None
+        assert component_body["source_documents"][0]["connector_type"] == "slack"
+        assert component_body["source_documents"][0]["label"] is not None
