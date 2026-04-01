@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  useConnectZoom,
   useConnectNotion,
   useConnectorSyncJobs,
   useConnectorSyncStatus,
@@ -50,6 +51,7 @@ export default function Connectors() {
   const workspaces = useWorkspaces();
   const { selectedId } = useWorkspaceSelection();
   const connectNotionMut = useConnectNotion();
+  const connectZoomMut = useConnectZoom();
   const syncMut = useSyncConnector();
   const disconnectMut = useDisconnectConnector();
   const [actionError, setActionError] = useState(null);
@@ -57,6 +59,8 @@ export default function Connectors() {
   const [oauthFlow, setOauthFlow] = useState(null);
   const [notionFormOpen, setNotionFormOpen] = useState(false);
   const [notionToken, setNotionToken] = useState("");
+  const [zoomFormOpen, setZoomFormOpen] = useState(false);
+  const [zoomToken, setZoomToken] = useState("");
 
   const workspaceId = useMemo(
     () => resolveWorkspaceId(workspaces.data, selectedId),
@@ -203,8 +207,9 @@ export default function Connectors() {
             {isMock && <MockBadge />}
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            Slack is the native reference connector, and Notion is the first OSS-backed path. Drive and
-            Gong stay visible here so the admin surface is stable while the backend expands.
+            Slack is the native reference connector, Notion is the first OSS-backed path, and Zoom is the
+            transcript-first meeting source. Drive and Gong stay visible here so the admin surface is stable
+            while the backend expands.
           </p>
           {isMock && (
             <p className="text-xs text-amber-600 mt-2">
@@ -215,7 +220,7 @@ export default function Connectors() {
         </div>
         <div className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-right">
           <p className="text-[11px] uppercase tracking-wide text-gray-400">Phase</p>
-          <p className="text-sm font-medium text-gray-700">Slack + Notion</p>
+          <p className="text-sm font-medium text-gray-700">Slack + Notion + Zoom</p>
         </div>
       </div>
 
@@ -256,6 +261,11 @@ export default function Connectors() {
               onChangeNotionToken={setNotionToken}
               onToggleNotionForm={() => setNotionFormOpen((current) => !current)}
               connectNotionMut={connectNotionMut}
+              zoomFormOpen={connector.type === "zoom" ? zoomFormOpen : false}
+              zoomToken={zoomToken}
+              onChangeZoomToken={setZoomToken}
+              onToggleZoomForm={() => setZoomFormOpen((current) => !current)}
+              connectZoomMut={connectZoomMut}
               syncMut={syncMut}
               disconnectMut={disconnectMut}
               onActionError={setActionError}
@@ -281,6 +291,11 @@ function ConnectorCard({
   onChangeNotionToken,
   onToggleNotionForm,
   connectNotionMut,
+  zoomFormOpen,
+  zoomToken,
+  onChangeZoomToken,
+  onToggleZoomForm,
+  connectZoomMut,
   syncMut,
   disconnectMut,
   onActionError,
@@ -303,8 +318,15 @@ function ConnectorCard({
     scope,
     syncQueuedAt,
     syncMode,
+    syncModeNote,
     processedCount,
     totalProcessedCount,
+    authMode,
+    accountId,
+    ingestionMode,
+    sourceFocus,
+    lastWebhookEvent,
+    lastWebhookReceivedAt,
     provider,
     providerLabel,
     providerNote,
@@ -312,6 +334,7 @@ function ConnectorCard({
 
   const isSlack = type === "slack";
   const isNotion = type === "notion";
+  const isZoom = type === "zoom";
   const canConnect = !isDemo && !oauthPending && availability === "available" && status === "disconnected" && !!workspaceId;
   const canReconnect =
     !isDemo &&
@@ -324,6 +347,7 @@ function ConnectorCard({
   const installHref = workspaceId
     ? `/api/connectors/${type}/install?workspace_id=${workspaceId}`
     : null;
+  const zoomOauthHref = isZoom ? installHref : null;
   const processedDocuments = processing?.processedDocuments ?? totalProcessedCount;
   const pendingDocuments = processing?.unprocessedDocuments ?? Math.max(Number(itemsSynced || 0) - processedDocuments, 0);
   const syncStatusQuery = useConnectorSyncStatus(connectorId, {
@@ -379,6 +403,27 @@ function ConnectorCard({
             status === "disconnected"
               ? "Notion connected. Run a sync to start storing workspace pages."
               : "Notion token updated. Run another sync to refresh workspace pages.",
+          );
+        },
+      },
+    );
+  };
+
+  const handleZoomConnect = (event) => {
+    event.preventDefault();
+    onActionError(null);
+    onActionNotice(null);
+    connectZoomMut.mutate(
+      { token: zoomToken },
+      {
+        onError: (err) => onActionError(formatActionError(err) || "Failed to connect Zoom."),
+        onSuccess: () => {
+          onChangeZoomToken("");
+          onToggleZoomForm();
+          onActionNotice(
+            status === "disconnected"
+              ? "Zoom manual token saved. Run a sync to start storing meeting transcripts."
+              : "Zoom manual token updated. Run another sync to refresh meeting transcripts.",
           );
         },
       },
@@ -453,6 +498,11 @@ function ConnectorCard({
         {syncMode && (
           <p className="text-[11px] text-gray-400 mt-2 capitalize">
             Last sync mode: {syncMode}
+          </p>
+        )}
+        {syncModeNote && (
+          <p className="text-[11px] text-gray-400 mt-2">
+            {syncModeNote}
           </p>
         )}
         {syncQueuedAt && (
@@ -552,6 +602,20 @@ function ConnectorCard({
             Connector path: {providerNote}
           </p>
         )}
+        {isZoom && (
+          <ZoomCapabilityPanel
+            status={status}
+            authMode={authMode}
+            accountId={accountId}
+            ingestionMode={ingestionMode}
+            sourceFocus={sourceFocus}
+            lastWebhookEvent={lastWebhookEvent}
+            lastWebhookReceivedAt={lastWebhookReceivedAt}
+            oauthHref={zoomOauthHref}
+            isDemo={isDemo}
+            oauthPending={oauthPending}
+          />
+        )}
         {scope && (
           <p className="text-[11px] text-gray-400 mt-2">
             Slack scopes: {scope}
@@ -567,6 +631,11 @@ function ConnectorCard({
             Add a Notion integration token, then sync pages into stored source documents for extraction and query.
           </p>
         )}
+        {isZoom && status === "disconnected" && availability === "available" && (
+          <p className="text-[11px] text-gray-500 mt-2">
+            Choose OAuth for webhook-driven transcript sync, or save a manual token if polling-only ingestion is enough for now.
+          </p>
+        )}
         {isSlack && status === "error" && (
           <p className="text-[11px] text-red-600 mt-2">
             Slack needs attention. Reconnect the workspace or retry sync after checking OAuth and connector health.
@@ -575,6 +644,11 @@ function ConnectorCard({
         {isNotion && status === "error" && (
           <p className="text-[11px] text-red-600 mt-2">
             Notion needs attention. Update the integration token, then run another sync.
+          </p>
+        )}
+        {isZoom && status === "error" && (
+          <p className="text-[11px] text-red-600 mt-2">
+            Zoom needs attention. Reconnect OAuth or update the manual token, then run another sync.
           </p>
         )}
         {status === "connected" && teamName && (
@@ -600,6 +674,13 @@ function ConnectorCard({
         {isNotion && status === "connected" && itemsSynced === 0 && !syncQueuedAt && (
           <p className="text-[11px] text-gray-500 mt-2">
             Notion is connected. Run a sync to store workspace pages and surface them in Sources and Query.
+          </p>
+        )}
+        {isZoom && status === "connected" && itemsSynced === 0 && !syncQueuedAt && (
+          <p className="text-[11px] text-gray-500 mt-2">
+            {authMode === "oauth"
+              ? "Zoom OAuth is connected. Webhook-driven sync is ready for supported recording events, or you can run a sync now."
+              : "Zoom is connected in manual polling mode. Run a sync to store meeting transcripts and surface them in Sources and Query."}
           </p>
         )}
         {status === "coming_soon" && (
@@ -639,6 +720,40 @@ function ConnectorCard({
             <button
               type="button"
               onClick={onToggleNotionForm}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {isZoom && zoomFormOpen && (
+        <form onSubmit={handleZoomConnect} className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+          <div>
+            <label htmlFor="zoom-token" className="block text-xs font-medium text-gray-600 mb-1">
+              Zoom access token
+            </label>
+            <input
+              id="zoom-token"
+              type="password"
+              value={zoomToken}
+              onChange={(event) => onChangeZoomToken(event.target.value)}
+              placeholder="zoom_access_token"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={connectZoomMut.isPending || !zoomToken.trim()}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {connectZoomMut.isPending ? "Saving..." : "Save Zoom token"}
+            </button>
+            <button
+              type="button"
+              onClick={onToggleZoomForm}
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-white"
             >
               Cancel
@@ -695,6 +810,24 @@ function ConnectorCard({
             className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
           >
             Update Notion token
+          </button>
+        ) : isZoom && status === "disconnected" ? (
+          <button
+            type="button"
+            disabled={isDemo || !workspaceId}
+            onClick={onToggleZoomForm}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            Use manual token
+          </button>
+        ) : isZoom && (status === "connected" || status === "error") ? (
+          <button
+            type="button"
+            disabled={isDemo}
+            onClick={onToggleZoomForm}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+          >
+            Update Zoom token
           </button>
         ) : (
           <button
@@ -780,6 +913,86 @@ function formatActionError(error) {
     return error.detail.map((item) => item.msg).join(". ");
   }
   return error.message || null;
+}
+
+function ZoomCapabilityPanel({
+  status,
+  authMode,
+  accountId,
+  ingestionMode,
+  sourceFocus,
+  lastWebhookEvent,
+  lastWebhookReceivedAt,
+  oauthHref,
+  isDemo,
+  oauthPending,
+}) {
+  const mode = authMode === "oauth" ? "oauth" : authMode === "manual_token" ? "manual_token" : "unknown";
+  const badgeClass =
+    mode === "oauth"
+      ? "bg-emerald-100 text-emerald-700"
+      : mode === "manual_token"
+        ? "bg-amber-100 text-amber-700"
+        : "bg-gray-100 text-gray-600";
+
+  const modeLabel =
+    mode === "oauth"
+      ? "OAuth auto-sync"
+      : mode === "manual_token"
+        ? "Manual polling"
+        : "Choose auth mode";
+
+  const modeSummary =
+    mode === "oauth"
+      ? "Webhook-triggered sync is enabled for supported transcript and recording completion events."
+      : mode === "manual_token"
+        ? "This connector stays polling-only. Use Sync now to pull transcripts, or upgrade to OAuth for webhook-driven sync."
+        : "Zoom supports OAuth for webhook-triggered auto-sync or a manual token for polling-only transcript sync.";
+
+  const ctaLabel =
+    status === "connected" || status === "error"
+      ? mode === "oauth"
+        ? "Refresh Zoom OAuth"
+        : "Upgrade to Zoom OAuth"
+      : "Connect Zoom OAuth";
+
+  return (
+    <div className="mt-3 rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] uppercase tracking-wide text-sky-700">Zoom sync mode</p>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badgeClass}`}>
+          {modeLabel}
+        </span>
+      </div>
+      <p className="mt-2 text-[11px] text-sky-900">{modeSummary}</p>
+      {(ingestionMode || sourceFocus) && (
+        <p className="mt-2 text-[11px] text-sky-800">
+          {ingestionMode === "transcripts_only" ? "Transcript-only ingestion" : ingestionMode || "Ingestion configured"}
+          {sourceFocus ? ` · ${sourceFocus.replaceAll("_", " ")}` : ""}
+        </p>
+      )}
+      {accountId && (
+        <p className="mt-1 text-[11px] text-sky-800">
+          Account: {accountId}
+        </p>
+      )}
+      {(lastWebhookEvent || lastWebhookReceivedAt) && (
+        <p className="mt-1 text-[11px] text-sky-800">
+          Last webhook:
+          {lastWebhookEvent ? ` ${lastWebhookEvent}` : " event received"}
+          {lastWebhookReceivedAt ? ` · ${lastWebhookReceivedAt}` : ""}
+        </p>
+      )}
+      {!isDemo && !oauthPending && oauthHref && (
+        <a
+          href={oauthHref}
+          className="inline-flex mt-3 text-[11px] font-medium text-sky-800 underline underline-offset-2 hover:text-sky-900"
+        >
+          {ctaLabel}
+        </a>
+      )}
+    </div>
+  );
 }
 
 function SlackSummaryBanner({ connector, isDemo, oauthPending, workspaceId, onStartOAuth }) {

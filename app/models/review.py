@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
@@ -56,4 +67,39 @@ class ReviewItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     component: Mapped["Component"] = orm_relationship(
         foreign_keys=[component_id],
         back_populates="review_item",
+    )
+    decision_history: Mapped[list["ReviewDecision"]] = orm_relationship(
+        back_populates="review_item",
+        cascade="all, delete-orphan",
+        order_by=lambda: ReviewDecision.created_at.desc(),
+    )
+
+
+class ReviewDecision(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "review_decisions"
+
+    review_item_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("review_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    previous_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    new_status: Mapped[str] = mapped_column(String(50), nullable=False)
+    actor_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="operator",
+        server_default=text("'operator'"),
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    review_item: Mapped["ReviewItem"] = orm_relationship(
+        foreign_keys=[review_item_id],
+        back_populates="decision_history",
     )

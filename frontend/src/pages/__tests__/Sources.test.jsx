@@ -70,6 +70,26 @@ const baseDocuments = [
     processed: true,
     location: "Engineering Roadmap",
   },
+  {
+    id: "sd4",
+    connectorType: "zoom",
+    externalId: "zoom:987654321:transcript-file-1",
+    author: "founder@example.com",
+    content:
+      "Meeting: Weekly Product Review\nHost: founder@example.com\nParticipants: Founder, Ops\n\nFounder: decision: Launch the pricing page next Tuesday.",
+    preview: "Meeting: Weekly Product Review",
+    sourceUrl: "https://zoom.us/rec/play/transcript-file-1",
+    createdAtSource: "2026-03-31T10:00:05Z",
+    ingestedAt: "2026-03-31T10:16:00Z",
+    processedAt: "2026-03-31T10:18:00Z",
+    processed: true,
+    location: "Weekly Product Review",
+    meetingTopic: "Weekly Product Review",
+    host: "founder@example.com",
+    participants: ["Founder", "Ops"],
+    recordingDate: "2026-03-31",
+    sourceType: "zoom_transcript",
+  },
 ];
 
 function renderSources(initialEntries = ["/app/sources"]) {
@@ -147,7 +167,7 @@ describe("Sources", () => {
 
     expect(screen.getByText("Sources")).toBeInTheDocument();
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
-    expect(screen.getByText(/3 stored · 2 processed · 1 pending/)).toBeInTheDocument();
+    expect(screen.getByText(/4 stored · 3 processed · 1 pending/)).toBeInTheDocument();
     expect(within(detail).getByText("Alice")).toBeInTheDocument();
     expect(within(detail).getByText("Raw content")).toBeInTheDocument();
     expect(
@@ -173,6 +193,10 @@ describe("Sources", () => {
           modelId: "pricing",
           modelName: "Pricing Strategy",
           reviewStatus: "needs_review",
+          reviewSummary: "Finance still needs final confirmation.",
+          temporalState: "historical",
+          validFrom: "2026-03-20T00:00:00Z",
+          validTo: "2026-03-29T00:00:00Z",
         },
       ],
       isLoading: false,
@@ -186,6 +210,24 @@ describe("Sources", () => {
           kind: "conflict",
           model: "Pricing Strategy",
           status: "needs_review",
+          decisionHistory: [
+            {
+              id: "rqd1",
+              previousStatus: null,
+              newStatus: "needs_review",
+              actorType: "system",
+              note: "Conflict generated automatically during ingestion.",
+              createdAt: "2026-03-29T09:30:00Z",
+            },
+            {
+              id: "rqd2",
+              previousStatus: "needs_review",
+              newStatus: "approved",
+              actorType: "human",
+              note: "Finance confirmed the new price.",
+              createdAt: "2026-03-29T10:00:00Z",
+            },
+          ],
         },
       ],
       isLoading: false,
@@ -203,6 +245,36 @@ describe("Sources", () => {
     expect(
       within(detail).getByRole("link", { name: /Enterprise pricing changed across Slack and Notion/ }),
     ).toHaveAttribute("href", "/app/review/rq1");
+    expect(within(detail).getByText(/Historical version/)).toBeInTheDocument();
+    expect(within(detail).getByText(/Finance still needs final confirmation/)).toBeInTheDocument();
+    expect(within(detail).getByText("Decision history")).toBeInTheDocument();
+    expect(within(detail).getByText("Marked needs review")).toBeInTheDocument();
+    expect(within(detail).getByText("needs review -> approved")).toBeInTheDocument();
+    expect(within(detail).getByText("Conflict generated automatically during ingestion.")).toBeInTheDocument();
+    expect(within(detail).getByText("Finance confirmed the new price.")).toBeInTheDocument();
+  });
+
+  it("renders transcript metadata for Zoom source documents", () => {
+    useSourceDocuments.mockReturnValue({
+      data: baseDocuments,
+      isMock: false,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      hasMore: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+      total: baseDocuments.length,
+    });
+
+    renderSources(["/app/sources/sd4"]);
+
+    const detail = screen.getByRole("region", { name: "Document detail" });
+    expect(within(detail).getByText("zoom")).toBeInTheDocument();
+    expect(within(detail).getAllByText("Weekly Product Review")).toHaveLength(2);
+    expect(within(detail).getAllByText("founder@example.com")).toHaveLength(2);
+    expect(within(detail).getByText("Founder, Ops")).toBeInTheDocument();
+    expect(within(detail).getByText("zoom transcript")).toBeInTheDocument();
   });
 
   it("queues reprocess for a live source document", async () => {

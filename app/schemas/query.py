@@ -17,6 +17,7 @@ class QueryFilters(BaseModel):
     model_names: list[str] | None = None
     min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     max_age_days: int | None = Field(default=None, ge=0)
+    as_of: datetime | None = None
 
 
 class QueryRequest(BaseModel):
@@ -25,12 +26,14 @@ class QueryRequest(BaseModel):
     model_names: list[str] | None = None
     min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     max_age_days: int | None = Field(default=None, ge=0)
+    as_of: datetime | None = None
 
     def to_filters(self) -> QueryFilters:
         return QueryFilters(
             model_names=self.model_names,
             min_confidence=self.min_confidence,
             max_age_days=self.max_age_days,
+            as_of=self.as_of,
         )
 
 
@@ -54,6 +57,7 @@ class QueryComponentRead(BaseModel):
     value: str
     confidence: float
     authority_source: str | None = None
+    authority_weight: float = 0.5
     last_verified_at: datetime | None = None
     valid_from: datetime | None = None
     valid_to: datetime | None = None

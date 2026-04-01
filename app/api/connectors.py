@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,9 @@ from app.schemas.connector import (
     NotionConnectRequest,
     SyncJobDetail,
     SyncJobResponse,
+    ZoomConnectRequest,
 )
+from app.schemas.knowledge import ComponentRead
 from app.schemas.source import SourceDocumentList, SourceDocumentRead
 from app.services.connector_service import (
     ConfigurationError,
@@ -27,6 +30,7 @@ from app.services.connector_service import (
     OAuthError,
     SyncError,
     SyncInProgressError,
+    WebhookVerificationError,
     WorkspaceNotFoundError,
 )
 
@@ -55,6 +59,19 @@ def _serialize_sync_job(job) -> SyncJobDetail:
 
 def _serialize_connector(connector) -> ConnectorRead:
     strategy = get_connector_strategy(connector.connector_type)
+    provider_note = strategy.note
+    if connector.connector_type == ConnectorType.ZOOM:
+        auth_mode = (connector.config or {}).get("auth_mode")
+        if auth_mode == "manual_token":
+            provider_note = (
+                f"{strategy.note} Manual-token Zoom connections are polling-only; "
+                "webhook-driven sync requires OAuth install."
+            )
+        elif auth_mode == "oauth":
+            provider_note = (
+                f"{strategy.note} OAuth-installed Zoom connections support "
+                "webhook-driven sync."
+            )
     return ConnectorRead(
         id=connector.id,
         workspace_id=connector.workspace_id,
@@ -64,7 +81,7 @@ def _serialize_connector(connector) -> ConnectorRead:
         config=connector.config,
         provider=strategy.provider.value,
         provider_label=strategy.provider_label,
-        provider_note=strategy.note,
+        provider_note=provider_note,
     )
 
 
@@ -166,6 +183,101 @@ async def slack_callback(
     return _serialize_connector(connector)
 
 
+@router.get("/connectors/zoom/install")
+async def zoom_install(
+    workspace_id: UUID,
+    svc: ConnectorService = Depends(_service),
+):
+    try:
+        url = await svc.build_zoom_install_url(workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
+    except ConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        )
+
+    return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/connectors/zoom/callback", response_model=ConnectorRead)
+async def zoom_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    svc: ConnectorService = Depends(_service),
+) -> ConnectorRead:
+    try:
+        connector = await svc.handle_zoom_callback(
+            code=code,
+            state=state,
+            error=error,
+        )
+    except InvalidStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except OAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        )
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
+    except ConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        )
+    return _serialize_connector(connector)
+
+
+@router.post("/connectors/zoom/webhook")
+async def zoom_webhook(
+    request: Request,
+    svc: ConnectorService = Depends(_service),
+) -> dict[str, object]:
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Zoom webhook payload must be valid JSON",
+        ) from exc
+
+    try:
+        return await svc.handle_zoom_webhook(
+            payload=payload,
+            raw_body=raw_body,
+            signature=request.headers.get("x-zm-signature"),
+            request_timestamp=request.headers.get("x-zm-request-timestamp"),
+        )
+    except WebhookVerificationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except OAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except ConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        )
+
+
 # ── Notion manual connect ─────────────────────────────────────────
 
 
@@ -176,6 +288,29 @@ async def connect_notion(
 ) -> ConnectorRead:
     try:
         connector = await svc.connect_notion(
+            workspace_id=body.workspace_id,
+            token=body.token,
+        )
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
+    except ConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        )
+    return _serialize_connector(connector)
+
+
+@router.post("/connectors/zoom/connect", response_model=ConnectorRead)
+async def connect_zoom(
+    body: ZoomConnectRequest,
+    svc: ConnectorService = Depends(_service),
+) -> ConnectorRead:
+    try:
+        connector = await svc.connect_zoom(
             workspace_id=body.workspace_id,
             token=body.token,
         )
@@ -351,6 +486,7 @@ async def list_source_documents(
                 created_at_source=d.created_at_source,
                 ingested_at=d.ingested_at,
                 processed_at=d.processed_at,
+                deleted_at=d.deleted_at,
                 metadata=d.metadata_json,
             )
             for d in items
@@ -393,5 +529,73 @@ async def get_source_document(
         created_at_source=d.created_at_source,
         ingested_at=d.ingested_at,
         processed_at=d.processed_at,
+        deleted_at=d.deleted_at,
         metadata=d.metadata_json,
     )
+
+
+@router.post(
+    "/source-documents/{document_id}/reprocess",
+    response_model=SyncJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def reprocess_document(
+    document_id: UUID,
+    workspace_id: UUID,
+    svc: ConnectorService = Depends(_service),
+) -> SyncJobResponse:
+    """Re-queue extraction for a single source document."""
+    try:
+        job = await svc.reprocess_document(document_id, workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
+    except ConnectorNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source document not found",
+        )
+    except SyncInProgressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except SyncError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        )
+    return SyncJobResponse(
+        job_id=job.id,
+        job_type=job.job_type,
+        connector_id=job.connector_id,
+        status=job.status.value,
+        created_at=job.created_at,
+    )
+
+
+@router.get(
+    "/source-documents/{document_id}/components",
+    response_model=list[ComponentRead],
+)
+async def get_document_components(
+    document_id: UUID,
+    workspace_id: UUID,
+    svc: ConnectorService = Depends(_service),
+) -> list[ComponentRead]:
+    """Return all knowledge components derived from a source document."""
+    try:
+        components = await svc.get_document_components(document_id, workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
+    except ConnectorNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source document not found",
+        )
+    return [ComponentRead.model_validate(c) for c in components]

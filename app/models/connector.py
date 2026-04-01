@@ -51,6 +51,7 @@ class Connector(UUIDPrimaryKeyMixin, Base):
         server_default=text("'disconnected'"),
     )
     oauth_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     config: Mapped[dict[str, Any]] = mapped_column(
         JSONB,

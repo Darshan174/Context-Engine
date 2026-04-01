@@ -7,8 +7,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.knowledge import Component, KnowledgeModel, Relationship
+from app.models.knowledge import Component, ComponentSource, KnowledgeModel, Relationship
+from app.models.review import ReviewItem
 from app.models.user import Workspace
+from app.processing.embedder import BaseEmbedder, build_default_embedder
 
 
 class KnowledgeServiceError(Exception):
@@ -28,8 +30,14 @@ class InvalidRequestError(KnowledgeServiceError):
 
 
 class KnowledgeService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        embedder: BaseEmbedder | None = None,
+    ) -> None:
         self.session = session
+        self._embedder = embedder or build_default_embedder()
 
     async def create_model(self, **payload: object) -> KnowledgeModel:
         workspace_id = payload["workspace_id"]
@@ -66,7 +74,8 @@ class KnowledgeService:
             select(Component)
             .options(
                 selectinload(Component.source_documents),
-                selectinload(Component.review_item),
+                selectinload(Component.review_item).selectinload(ReviewItem.decision_history),
+                selectinload(Component.model),
             )
             .where(Component.id == component_id)
         )
@@ -76,20 +85,29 @@ class KnowledgeService:
 
     async def add_component(self, model_id: UUID, **payload: object) -> Component:
         model = await self.get_model(model_id)
+        payload.setdefault(
+            "embedding",
+            await self._embedder.embed_text(
+                f"{payload['name']}\n{payload['value']}"
+            ),
+        )
         component = Component(model_id=model.id, **payload)
         self.session.add(component)
         await self._commit_or_raise("Unable to create component with the provided data")
-        await self.session.refresh(component)
-        return component
+        return await self.get_component(component.id)
 
     async def update_component(self, component_id: UUID, **payload: object) -> Component:
         component = await self._get_component(component_id)
+        should_refresh_embedding = "name" in payload or "value" in payload
         for field, value in payload.items():
             setattr(component, field, value)
+        if should_refresh_embedding:
+            component.embedding = await self._embedder.embed_text(
+                f"{component.name}\n{component.value}"
+            )
 
         await self._commit_or_raise("Unable to update component with the provided data")
-        await self.session.refresh(component)
-        return component
+        return await self.get_component(component.id)
 
     async def delete_component(self, component_id: UUID) -> None:
         component = await self._get_component(component_id)
@@ -130,6 +148,16 @@ class KnowledgeService:
         )
         return list(result)
 
+    async def get_component_sources(self, component_id: UUID) -> list[ComponentSource]:
+        """Return ComponentSource rows (with source_document loaded) for a component."""
+        await self._get_component(component_id)  # raises if missing
+        result = await self.session.scalars(
+            select(ComponentSource)
+            .options(selectinload(ComponentSource.source_document))
+            .where(ComponentSource.component_id == component_id)
+        )
+        return list(result)
+
     async def get_component_relationships(self, component_id: UUID) -> list[Relationship]:
         await self._get_component(component_id)
         result = await self.session.scalars(
@@ -166,7 +194,9 @@ class KnowledgeService:
             select(KnowledgeModel)
             .options(
                 selectinload(KnowledgeModel.components).selectinload(Component.source_documents),
-                selectinload(KnowledgeModel.components).selectinload(Component.review_item),
+                selectinload(KnowledgeModel.components)
+                .selectinload(Component.review_item)
+                .selectinload(ReviewItem.decision_history),
             )
             .where(KnowledgeModel.id == model_id)
         )

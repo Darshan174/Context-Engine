@@ -36,7 +36,10 @@ async def _create_component(
     value: str,
     confidence: float = 0.9,
     authority_source: str | None = None,
+    authority_weight: float = 0.5,
     last_verified_at: datetime | None = None,
+    valid_from: datetime | None = None,
+    valid_to: datetime | None = None,
 ) -> Component:
     component = Component(
         model_id=model_id,
@@ -44,6 +47,9 @@ async def _create_component(
         value=value,
         confidence=confidence,
         authority_source=authority_source,
+        authority_weight=authority_weight,
+        valid_from=valid_from or datetime.now(UTC),
+        valid_to=valid_to,
         last_verified_at=last_verified_at or datetime.now(UTC),
     )
     db_session.add(component)
@@ -534,3 +540,163 @@ class TestQueryAPI:
         assert component_body["temporal_state"] is None
         assert component_body["source_documents"][0]["connector_type"] == "slack"
         assert component_body["source_documents"][0]["label"] is not None
+
+    async def test_query_prefers_higher_authority_fact_when_values_conflict(
+        self, client, db_session, workspace
+    ):
+        pricing = await _create_model(db_session, workspace.id, "Pricing", "Pricing information")
+        await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Plan",
+            value="$450/seat",
+            confidence=0.94,
+            authority_source="Pricing spec",
+            authority_weight=0.95,
+            last_verified_at=datetime.now(UTC),
+        )
+        await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Plan",
+            value="$400/seat",
+            confidence=0.97,
+            authority_source="Slack thread",
+            authority_weight=0.55,
+            last_verified_at=datetime.now(UTC),
+        )
+
+        resp = await client.post(
+            "/api/query",
+            json={
+                "question": "What is the enterprise plan price?",
+                "workspace_id": str(workspace.id),
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["components"][0]["value"] == "$450/seat"
+        assert body["components"][0]["authority_weight"] == 0.95
+
+    async def test_query_prefers_approved_current_truth_when_scores_are_close(
+        self, client, db_session, workspace
+    ):
+        pricing = await _create_model(db_session, workspace.id, "Pricing", "Pricing information")
+        reviewed = await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Plan",
+            value="$600/seat",
+            confidence=0.9,
+            authority_source="Pricing handbook",
+            authority_weight=0.88,
+            last_verified_at=datetime.now(UTC),
+        )
+        pending = await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Pricing Notes",
+            value="$600/seat provisional",
+            confidence=0.95,
+            authority_source="Slack thread",
+            authority_weight=0.82,
+            last_verified_at=datetime.now(UTC),
+        )
+        db_session.add(
+            ReviewItem(
+                component_id=reviewed.id,
+                status="approved",
+                severity="low",
+                kind="review_item",
+                title="Enterprise pricing approved",
+                summary="Pricing handbook is current.",
+                confidence=0.9,
+            )
+        )
+        db_session.add(
+            ReviewItem(
+                component_id=pending.id,
+                status="needs_review",
+                severity="medium",
+                kind="low_confidence",
+                title="Slack pricing note still needs review",
+                summary="Slack note is not yet approved.",
+                confidence=0.55,
+            )
+        )
+        await db_session.flush()
+
+        resp = await client.post(
+            "/api/query",
+            json={
+                "question": "What is the current enterprise plan price?",
+                "workspace_id": str(workspace.id),
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["components"][0]["id"] == str(reviewed.id)
+        assert body["components"][0]["review_status"] == "approved"
+
+    async def test_query_supports_as_of_historical_answers(
+        self, client, db_session, workspace
+    ):
+        pricing = await _create_model(db_session, workspace.id, "Pricing", "Pricing information")
+        old_component = await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Plan",
+            value="$500/seat",
+            confidence=0.9,
+            authority_weight=0.9,
+            valid_from=datetime(2026, 3, 1, tzinfo=UTC),
+            valid_to=datetime(2026, 3, 20, tzinfo=UTC),
+            last_verified_at=datetime(2026, 3, 15, tzinfo=UTC),
+        )
+        new_component = await _create_component(
+            db_session,
+            model_id=pricing.id,
+            name="Enterprise Plan",
+            value="$600/seat",
+            confidence=0.92,
+            authority_weight=0.9,
+            valid_from=datetime(2026, 3, 20, tzinfo=UTC),
+            last_verified_at=datetime(2026, 3, 20, tzinfo=UTC),
+        )
+        old_component.superseded_by_id = new_component.id
+        db_session.add(
+            ReviewItem(
+                component_id=old_component.id,
+                status="superseded",
+                severity="low",
+                kind="superseded_fact",
+                title="Enterprise Plan is now historical",
+                summary="Superseded by a newer plan.",
+                confidence=old_component.confidence,
+            )
+        )
+        await db_session.flush()
+
+        current = await client.post(
+            "/api/query",
+            json={
+                "question": "What is the enterprise plan price?",
+                "workspace_id": str(workspace.id),
+            },
+        )
+        historical = await client.post(
+            "/api/query",
+            json={
+                "question": "What is the enterprise plan price?",
+                "workspace_id": str(workspace.id),
+                "as_of": "2026-03-10T00:00:00Z",
+            },
+        )
+
+        assert current.status_code == 200
+        assert historical.status_code == 200
+        assert current.json()["components"][0]["value"] == "$600/seat"
+        assert historical.json()["components"][0]["value"] == "$500/seat"
+        assert historical.json()["answer"].startswith("As of 2026-03-10")

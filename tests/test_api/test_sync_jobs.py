@@ -146,18 +146,19 @@ class TestSyncJobDispatch:
         conn = _make_connected_slack(workspace, token_enc)
         db_session.add(conn)
         await db_session.flush()
+        conn_id = conn.id  # capture before expire_all
 
         monkeypatch.setattr(
             "app.tasks.sync.run_sync.delay",
             MagicMock(side_effect=Exception("Redis unreachable")),
         )
 
-        resp = await client.post(f"/api/connectors/{conn.id}/sync")
+        resp = await client.post(f"/api/connectors/{conn_id}/sync")
         assert resp.status_code == 502
 
         db_session.expire_all()
         job = await db_session.scalar(
-            select(SyncJob).where(SyncJob.connector_id == conn.id)
+            select(SyncJob).where(SyncJob.connector_id == conn_id)
         )
         assert job is not None
         assert job.status == SyncJobStatus.FAILED
@@ -305,7 +306,7 @@ class TestSyncExecutor:
     """
 
     def _setup(self, monkeypatch):
-        monkeypatch.setattr(sync_module.settings, "encryption_key", _TEST_FERNET_KEY)
+        monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
 
     def _mock_executor_connector(self, monkeypatch, mock_connector):
         monkeypatch.setattr(

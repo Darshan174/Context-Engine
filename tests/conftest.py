@@ -23,6 +23,8 @@ from sqlalchemy.pool import NullPool
 from app.database import get_db_session
 from app.main import app
 from app.models.base import Base
+from app.processing.embedder import HashingEmbedder
+from app.processing.extractor import RegexExtractor
 
 # ---------------------------------------------------------------------------
 # Allow pointing at a dedicated test database; fall back to the dev one.
@@ -81,6 +83,44 @@ def _reset_database() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Force local embedder in all tests — prevents the dummy LITELLM_API_KEY in
+# .env from triggering real API calls.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _force_local_providers(monkeypatch):
+    """Force deterministic, offline embedder and extractor in all tests.
+
+    The ``.env`` ships a placeholder ``LITELLM_API_KEY`` which causes the
+    default builders to choose provider-backed implementations that fail
+    with ``AuthenticationError``.  Patch every import site so the test
+    suite stays fully offline.
+    """
+    monkeypatch.setattr("app.config.settings.litellm_api_key", None)
+    monkeypatch.setattr("app.config.settings.enable_default_provider_models", False)
+    monkeypatch.setattr("app.processing.embedder.settings.litellm_api_key", None)
+    monkeypatch.setattr(
+        "app.processing.embedder.settings.enable_default_provider_models",
+        False,
+    )
+    monkeypatch.setattr("app.processing.extractor.settings.litellm_api_key", None)
+    monkeypatch.setattr(
+        "app.processing.extractor.settings.enable_default_provider_models",
+        False,
+    )
+    monkeypatch.setattr("app.services.llm_service.settings.litellm_api_key", None)
+
+    _hashing = lambda: HashingEmbedder()
+    monkeypatch.setattr("app.processing.embedder.build_default_embedder", _hashing)
+    monkeypatch.setattr("app.services.knowledge_service.build_default_embedder", _hashing)
+    monkeypatch.setattr("app.services.ingestion_service.build_default_embedder", _hashing)
+    monkeypatch.setattr("app.services.query_service.build_default_embedder", _hashing)
+
+    _regex = lambda: RegexExtractor()
+    monkeypatch.setattr("app.processing.extractor.build_default_extractor", _regex)
+    monkeypatch.setattr("app.services.ingestion_service.build_default_extractor", _regex)
+
+
+# ---------------------------------------------------------------------------
 # Session-scoped engine & table creation
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
@@ -102,7 +142,7 @@ async def engine():
         await conn.execute(
             text(
                 "CREATE TYPE connector_type_enum AS ENUM "
-                "('slack', 'notion', 'gdrive', 'gong')"
+                "('slack', 'notion', 'zoom', 'gdrive', 'gong')"
             )
         )
         await conn.execute(

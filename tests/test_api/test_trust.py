@@ -88,6 +88,9 @@ async def _seed_component_graph(db_session, workspace):
             component_id=component.id,
             source_document_id=slack_doc.id,
             extraction_context="Extracted from pricing thread",
+            extractor_name="structured_llm",
+            extractor_kind="llm_structured",
+            extractor_schema_version="fact_extraction.v1",
         ),
         ComponentSource(
             component_id=component.id,
@@ -176,6 +179,10 @@ class TestReviewItems:
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "approved"
+        assert len(body["decision_history"]) == 1
+        assert body["decision_history"][0]["previous_status"] == "needs_review"
+        assert body["decision_history"][0]["new_status"] == "approved"
+        assert body["decision_history"][0]["actor_type"] == "operator"
 
         await db_session.refresh(seeded["review_item"])
         await db_session.refresh(seeded["component"])
@@ -189,6 +196,8 @@ class TestReviewItems:
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "rejected"
+        assert len(body["decision_history"]) == 1
+        assert body["decision_history"][0]["new_status"] == "rejected"
 
         await db_session.refresh(seeded["review_item"])
         await db_session.refresh(seeded["component"])
@@ -202,6 +211,8 @@ class TestReviewItems:
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "superseded"
+        assert len(body["decision_history"]) == 1
+        assert body["decision_history"][0]["new_status"] == "superseded"
 
         await db_session.refresh(seeded["review_item"])
         await db_session.refresh(seeded["component"])
@@ -221,7 +232,9 @@ class TestProvenanceEndpoints:
             "#pricing enterprise decision",
             "Pricing strategy page",
         }
-        assert body[0]["extraction_context"] is not None
+        assert all(item["extraction_context"] is not None for item in body)
+        schema_versions = {item["extractor_schema_version"] for item in body}
+        assert "fact_extraction.v1" in schema_versions
 
     async def test_source_document_components(self, client, workspace, db_session):
         seeded = await _seed_component_graph(db_session, workspace)

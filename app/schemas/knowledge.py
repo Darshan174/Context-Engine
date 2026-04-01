@@ -10,6 +10,7 @@ from app.models.knowledge import (
     RelationshipSentiment,
     RelationshipType,
 )
+from app.schemas.review import ReviewDecisionRead
 
 
 class KnowledgeModelCreate(BaseModel):
@@ -25,6 +26,7 @@ class ComponentCreate(BaseModel):
     value: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
     authority_source: str | None = Field(default=None, max_length=255)
+    authority_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     last_verified_at: datetime | None = None
     is_stale: bool = False
 
@@ -34,6 +36,7 @@ class ComponentUpdate(BaseModel):
     value: str | None = Field(default=None, min_length=1)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     authority_source: str | None = Field(default=None, max_length=255)
+    authority_weight: float | None = Field(default=None, ge=0.0, le=1.0)
     last_verified_at: datetime | None = None
     is_stale: bool | None = None
 
@@ -55,15 +58,33 @@ class ComponentSourceDocumentRead(BaseModel):
     connector_type: str
 
 
+class ComponentSourceRead(BaseModel):
+    """One source document that contributed to a component."""
+
+    source_document_id: UUID
+    connector_type: str
+    external_id: str
+    label: str
+    source_url: str | None
+    author: str | None
+    ingested_at: datetime
+    extraction_context: str | None
+    extractor_name: str | None = None
+    extractor_kind: str | None = None
+    extractor_schema_version: str | None = None
+
+
 class ComponentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     model_id: UUID
+    model_name: str | None = None
     name: str
     value: str
     confidence: float
     authority_source: str | None
+    authority_weight: float
     valid_from: datetime
     valid_to: datetime | None
     superseded_by: UUID | None = None
@@ -72,6 +93,7 @@ class ComponentRead(BaseModel):
     review_status: str | None = None
     review_summary: str | None = None
     review_item_id: UUID | None = None
+    decision_history: list[ReviewDecisionRead] = []
     temporal_state: str | None = None
     source_documents: list[ComponentSourceDocumentRead] = []
     created_at: datetime

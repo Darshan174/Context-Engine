@@ -9,6 +9,7 @@ from app.database import get_db_session
 from app.schemas.knowledge import (
     ComponentCreate,
     ComponentRead,
+    ComponentSourceRead,
     ComponentUpdate,
     KnowledgeModelCreate,
     KnowledgeModelDetail,
@@ -177,6 +178,34 @@ async def get_model_relationships(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     return [RelationshipRead.model_validate(item) for item in relationships]
+
+
+@router.get("/components/{component_id}/sources", response_model=list[ComponentSourceRead])
+async def get_component_sources(
+    component_id: UUID,
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> list[ComponentSourceRead]:
+    try:
+        links = await service.get_component_sources(component_id)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return [
+        ComponentSourceRead(
+            source_document_id=link.source_document_id,
+            connector_type=link.source_document.connector_type.value,
+            external_id=link.source_document.external_id,
+            label=link.source_document.label,
+            source_url=link.source_document.source_url,
+            author=link.source_document.author,
+            ingested_at=link.source_document.ingested_at,
+            extraction_context=link.extraction_context,
+            extractor_name=link.extractor_name,
+            extractor_kind=link.extractor_kind,
+            extractor_schema_version=link.extractor_schema_version,
+        )
+        for link in links
+    ]
 
 
 @router.get("/components/{component_id}/relationships", response_model=list[RelationshipRead])

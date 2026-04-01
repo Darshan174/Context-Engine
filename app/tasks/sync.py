@@ -16,9 +16,10 @@ from sqlalchemy.orm import sessionmaker
 from app.config import settings
 from app.models.connector import Connector
 from app.models.job import SyncJob, SyncJobStatus
+from app.services.connector_service import ConfigurationError, ConnectorService, OAuthError
 from app.services.sync_service import SyncExecutor
 from app.tasks.celery_app import celery_app
-from app.utils.crypto import EncryptionError, decrypt_token
+from app.utils.crypto import EncryptionError
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,8 @@ async def _run_sync_async(sync_job_id: str, connector_id: str) -> dict:
                     return {"error": "connector not found"}
 
                 try:
-                    token = decrypt_token(connector.oauth_token_encrypted)
-                except (EncryptionError, TypeError) as exc:
+                    token = await ConnectorService(session).get_access_token_for_connector(connector)
+                except (EncryptionError, TypeError, ConfigurationError, OAuthError) as exc:
                     job.status = SyncJobStatus.FAILED
                     job.error_type = "EncryptionError"
                     job.error_message = str(exc)
@@ -67,7 +68,7 @@ async def _run_sync_async(sync_job_id: str, connector_id: str) -> dict:
             async with session.begin():
                 job = await session.get(SyncJob, sync_job_id)
                 connector = await session.get(Connector, connector_id)
-                token = decrypt_token(connector.oauth_token_encrypted)
+                token = await ConnectorService(session).get_access_token_for_connector(connector)
 
                 try:
                     result = await SyncExecutor(session).run(connector, token)

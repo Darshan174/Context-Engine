@@ -117,6 +117,59 @@ python scripts/smoke_phase1.py --base-url http://localhost:8001
 - `GET /health` returns basic liveness
 - `GET /health/ready` verifies PostgreSQL and Redis connectivity
 
+## Accuracy Runtime Config
+
+For provider-backed structured extraction and embeddings, set:
+
+```bash
+EXTRACTION_MODEL=openai/gpt-4.1-mini
+EMBEDDING_MODEL=openai/text-embedding-3-large
+EMBEDDING_DIMENSIONS=1024
+LITELLM_API_KEY=your-provider-key
+```
+
+`LITELLM_API_BASE` is optional for non-default providers or gateways. The
+backend stores embeddings in a fixed `pgvector` column, so `EMBEDDING_DIMENSIONS`
+must match the database vector size. If `LITELLM_API_KEY` is present and the
+model env vars are omitted, the backend will fall back to the default provider
+models above. In `production`, missing real extraction or embedding models are
+treated as configuration errors rather than silently relying on local fallbacks.
+
+For production Zoom ingestion, also set:
+
+```bash
+ZOOM_CLIENT_ID=...
+ZOOM_CLIENT_SECRET=...
+ZOOM_REDIRECT_URI=https://your-api.example.com/api/connectors/zoom/callback
+ZOOM_WEBHOOK_SECRET=...
+```
+
+The Zoom connector remains transcript-only. Webhooks now require valid
+`x-zm-signature` and `x-zm-request-timestamp` headers.
+OAuth-installed Zoom connectors support webhook-driven sync. Manual-token Zoom
+connections remain polling-only by design.
+
+## Eval Regression
+
+Run the startup-question regression harness against a seeded workspace:
+
+```bash
+python scripts/run_eval_regression.py --workspace-id REPLACE_WITH_WORKSPACE_ID
+```
+
+Optional thresholds:
+
+```bash
+python scripts/run_eval_regression.py \
+  --workspace-id REPLACE_WITH_WORKSPACE_ID \
+  --min-retrieval 0.85 \
+  --min-fact-correctness 0.85 \
+  --min-answer-correctness 0.80
+```
+
+The repository also includes a DB-backed gold-set regression test in
+`tests/test_evals/test_gold_set.py`, intended for CI gating.
+
 ## CRUD Smoke Test
 
 Create a model:

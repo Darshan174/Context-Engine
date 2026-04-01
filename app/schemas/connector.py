@@ -6,8 +6,6 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
@@ -72,6 +70,18 @@ class NotionConnectRequest(BaseModel):
     def token_not_blank(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Notion integration token must not be blank")
+        return v
+
+
+class ZoomConnectRequest(BaseModel):
+    workspace_id: UUID
+    token: str
+
+    @field_validator("token")
+    @classmethod
+    def token_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Zoom access token must not be blank")
         return v
 
 

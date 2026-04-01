@@ -21,10 +21,12 @@ export default function ComponentCard({
   sources,
   sourceDocuments,
   authority_source,
+  authority_weight,
   reviewStatus,
   reviewSummary,
   temporalState,
   reviewItemId,
+  decisionHistory,
   onUpdate,
   onDelete,
   updatePending,
@@ -214,9 +216,37 @@ export default function ComponentCard({
         </div>
       )}
 
+      {typeof authority_weight === "number" && (
+        <p className="text-[11px] text-gray-500 mb-3">
+          Authority weight {Math.round(authority_weight * 100)}%
+        </p>
+      )}
+
       {displaySourceDocuments.length > 0 && (
         <div className="mb-3">
           <SourceDocumentLinks items={displaySourceDocuments} label="Evidence" compact showMeta />
+        </div>
+      )}
+
+      {decisionHistory?.length > 0 && (
+        <div className="mb-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+            Review history
+          </p>
+          <div className="mt-2 space-y-2">
+            {decisionHistory.map((decision) => (
+              <div key={decision.id ?? `${decision.createdAt}-${decision.newStatus}`} className="text-xs text-gray-600">
+                <p className="font-medium text-gray-700">{formatDecisionTransition(decision)}</p>
+                <p className="mt-0.5 text-[11px] text-gray-500">
+                  {formatDecisionActor(decision.actorType)}
+                  {decision.createdAt ? ` · ${formatDate(decision.createdAt)}` : ""}
+                </p>
+                {decision.note && (
+                  <p className="mt-1 text-[11px] text-gray-500">{decision.note}</p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -258,4 +288,32 @@ function formatVerifiedAt(isoString) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function formatDecisionTransition(decision) {
+  const previous = decision?.previousStatus ?? decision?.previous_status;
+  const next = decision?.newStatus ?? decision?.new_status;
+  if (previous && next) {
+    return `${previous.replaceAll("_", " ")} -> ${next.replaceAll("_", " ")}`;
+  }
+  if (next) {
+    return `Marked ${next.replaceAll("_", " ")}`;
+  }
+  return "State updated";
+}
+
+function formatDecisionActor(actorType) {
+  if (!actorType) return "Unknown actor";
+  if (actorType === "system") return "System";
+  if (actorType === "human") return "Human reviewer";
+  return actorType.replaceAll("_", " ");
 }

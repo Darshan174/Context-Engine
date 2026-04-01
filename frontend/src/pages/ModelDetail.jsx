@@ -101,11 +101,13 @@ export default function ModelDetail() {
                     sources={c.sources}
                     sourceDocuments={c.sourceDocuments ?? c.source_documents}
                     authority_source={c.authority_source}
-              reviewStatus={c.reviewStatus ?? c.review_status}
-              reviewSummary={c.reviewSummary ?? c.review_summary}
-              temporalState={c.temporalState ?? c.temporal_state}
-              reviewItemId={c.reviewItemId ?? c.review_item_id}
-              onUpdate={isBackendData ? (body, opts) => updateMut.mutate(body, opts) : undefined}
+                    authority_weight={c.authorityWeight ?? c.authority_weight}
+                    reviewStatus={c.reviewStatus ?? c.review_status}
+                    reviewSummary={c.reviewSummary ?? c.review_summary}
+                    temporalState={c.temporalState ?? c.temporal_state}
+                    reviewItemId={c.reviewItemId ?? c.review_item_id}
+                    decisionHistory={c.decisionHistory ?? c.decision_history}
+                    onUpdate={isBackendData ? (body, opts) => updateMut.mutate(body, opts) : undefined}
                     onDelete={isBackendData ? (compId, opts) => deleteMut.mutate(compId, opts) : undefined}
                     updatePending={updateMut.isPending}
                     deletePending={deleteMut.isPending}
@@ -143,9 +145,12 @@ export default function ModelDetail() {
                     sources={c.sources}
                     sourceDocuments={c.sourceDocuments ?? c.source_documents}
                     authority_source={c.authority_source}
+                    authority_weight={c.authorityWeight ?? c.authority_weight}
                     reviewStatus={c.reviewStatus ?? c.review_status}
                     reviewSummary={c.reviewSummary ?? c.review_summary}
                     temporalState={c.temporalState ?? c.temporal_state}
+                    reviewItemId={c.reviewItemId ?? c.review_item_id}
+                    decisionHistory={c.decisionHistory ?? c.decision_history}
                     onUpdate={isBackendData ? (body, opts) => updateMut.mutate(body, opts) : undefined}
                     onDelete={isBackendData ? (compId, opts) => deleteMut.mutate(compId, opts) : undefined}
                     updatePending={updateMut.isPending}

@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.models.connector import Connector
 from app.models.job import SyncJob, SyncJobStatus
 from app.models.knowledge import Component, ComponentSource, KnowledgeModel
-from app.models.review import ReviewItem
+from app.models.review import ReviewDecision, ReviewItem
 from app.models.source import SourceDocument
 from app.models.user import Workspace
 
@@ -64,6 +64,7 @@ class TrustService:
             .options(
                 selectinload(ReviewItem.component).selectinload(Component.model),
                 selectinload(ReviewItem.component).selectinload(Component.source_documents),
+                selectinload(ReviewItem.decision_history),
             )
         )
 
@@ -91,7 +92,9 @@ class TrustService:
             .options(
                 selectinload(ReviewItem.component).selectinload(Component.model),
                 selectinload(ReviewItem.component).selectinload(Component.source_documents),
+                selectinload(ReviewItem.decision_history),
             )
+            .execution_options(populate_existing=True)
         )
         if item is None:
             raise TrustResourceNotFoundError("Review item not found")
@@ -99,31 +102,55 @@ class TrustService:
 
     async def approve_review_item(self, review_item_id: UUID) -> ReviewItem:
         item = await self.get_review_item(review_item_id)
+        previous_status = item.status
         item.status = "approved"
         component = item.component
         if component is not None:
             component.is_stale = False
             component.last_verified_at = datetime.now(timezone.utc)
+        await self._record_review_decision(
+            item,
+            previous_status=previous_status,
+            new_status=item.status,
+            actor_type="operator",
+            note="Review item approved via operator API.",
+        )
         await self.session.commit()
         return await self.get_review_item(review_item_id)
 
     async def reject_review_item(self, review_item_id: UUID) -> ReviewItem:
         item = await self.get_review_item(review_item_id)
+        previous_status = item.status
         item.status = "rejected"
         component = item.component
         if component is not None:
             component.is_stale = True
+        await self._record_review_decision(
+            item,
+            previous_status=previous_status,
+            new_status=item.status,
+            actor_type="operator",
+            note="Review item rejected via operator API.",
+        )
         await self.session.commit()
         return await self.get_review_item(review_item_id)
 
     async def supersede_review_item(self, review_item_id: UUID) -> ReviewItem:
         item = await self.get_review_item(review_item_id)
+        previous_status = item.status
         item.status = "superseded"
         component = item.component
         if component is not None:
             component.is_stale = True
             if component.valid_to is None:
                 component.valid_to = datetime.now(timezone.utc)
+        await self._record_review_decision(
+            item,
+            previous_status=previous_status,
+            new_status=item.status,
+            actor_type="operator",
+            note="Review item superseded via operator API.",
+        )
         await self.session.commit()
         return await self.get_review_item(review_item_id)
 
@@ -140,7 +167,10 @@ class TrustService:
                 SourceDocument,
                 ComponentSource.source_document_id == SourceDocument.id,
             )
-            .where(ComponentSource.component_id == component_id)
+            .where(
+                ComponentSource.component_id == component_id,
+                SourceDocument.deleted_at.is_(None),
+            )
             .order_by(SourceDocument.ingested_at.desc(), SourceDocument.id.desc())
         )
         return list(rows.all())
@@ -152,6 +182,7 @@ class TrustService:
 
         rows = await self.session.execute(
             select(Component, KnowledgeModel, ReviewItem)
+            .options(selectinload(ReviewItem.decision_history))
             .join(ComponentSource, ComponentSource.component_id == Component.id)
             .join(KnowledgeModel, Component.model_id == KnowledgeModel.id)
             .outerjoin(ReviewItem, ReviewItem.component_id == Component.id)
@@ -162,6 +193,28 @@ class TrustService:
             .order_by(KnowledgeModel.name.asc(), Component.name.asc())
         )
         return list(rows.all())
+
+    async def _record_review_decision(
+        self,
+        item: ReviewItem,
+        *,
+        previous_status: str | None,
+        new_status: str,
+        actor_type: str,
+        note: str | None,
+    ) -> None:
+        if previous_status == new_status:
+            return
+        self.session.add(
+            ReviewDecision(
+                review_item_id=item.id,
+                previous_status=previous_status,
+                new_status=new_status,
+                actor_type=actor_type,
+                note=note,
+            )
+        )
+        await self.session.flush()
 
     async def queue_document_reprocess(
         self, document_id: UUID, workspace_id: UUID
@@ -230,6 +283,7 @@ class TrustService:
             select(SourceDocument).where(
                 SourceDocument.id == document_id,
                 SourceDocument.connector_id.in_(connector_ids_q),
+                SourceDocument.deleted_at.is_(None),
             )
         )
         if document is None:

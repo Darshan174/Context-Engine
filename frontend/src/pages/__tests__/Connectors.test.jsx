@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import Connectors from "../Connectors";
 
 vi.mock("../../api/hooks", () => ({
+  useConnectZoom: vi.fn(),
   useConnectNotion: vi.fn(),
   useConnectorSyncJobs: vi.fn(),
   useConnectorSyncStatus: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("../../context/WorkspaceContext", () => ({
 }));
 
 import {
+  useConnectZoom,
   useConnectNotion,
   useConnectorSyncJobs,
   useConnectorSyncStatus,
@@ -45,6 +47,12 @@ const disconnectMut = {
 };
 
 const connectNotionMut = {
+  mutate: vi.fn(),
+  isPending: false,
+  variables: undefined,
+};
+
+const connectZoomMut = {
   mutate: vi.fn(),
   isPending: false,
   variables: undefined,
@@ -76,6 +84,8 @@ beforeEach(() => {
   syncMut.mutate.mockReset();
   disconnectMut.mutate.mockReset();
   connectNotionMut.mutate.mockReset();
+  connectZoomMut.mutate.mockReset();
+  useConnectZoom.mockReturnValue(connectZoomMut);
   useConnectNotion.mockReturnValue(connectNotionMut);
   useConnectorSyncJobs.mockReturnValue({
     data: [],
@@ -567,6 +577,118 @@ describe("Connectors", () => {
       );
     });
     expect(screen.getByText("Notion connected. Run a sync to start storing workspace pages.")).toBeInTheDocument();
+  });
+
+  it("opens a Zoom token form for a disconnected connector and submits it", async () => {
+    connectZoomMut.mutate.mockImplementation((_body, opts) => opts.onSuccess?.());
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "zoom",
+          connectorId: null,
+          name: "Zoom",
+          description: "Meeting transcripts",
+          status: "disconnected",
+          lastSync: "Never",
+          itemsSynced: 0,
+          color: "#0B5CFF",
+          availability: "available",
+          provider: "official_api",
+          providerLabel: "Official API",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    expect(screen.getByText("Choose auth mode")).toBeInTheDocument();
+    expect(screen.getByText(/Zoom supports OAuth for webhook-triggered auto-sync/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Zoom OAuth" })).toHaveAttribute(
+      "href",
+      "/api/connectors/zoom/install?workspace_id=ws_1",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Use manual token" }));
+    await userEvent.type(screen.getByLabelText("Zoom access token"), "zoom_test_token");
+    await userEvent.click(screen.getByRole("button", { name: "Save Zoom token" }));
+
+    await waitFor(() => {
+      expect(connectZoomMut.mutate).toHaveBeenCalledWith(
+        { token: "zoom_test_token" },
+        expect.any(Object),
+      );
+    });
+    expect(screen.getByText("Zoom manual token saved. Run a sync to start storing meeting transcripts.")).toBeInTheDocument();
+  });
+
+  it("shows polling-only guidance for Zoom manual-token connectors", () => {
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "zoom",
+          connectorId: "conn_zoom",
+          name: "Zoom",
+          description: "Meeting transcripts",
+          status: "connected",
+          lastSync: "Mar 31, 2026, 8:15 AM",
+          itemsSynced: 4,
+          color: "#0B5CFF",
+          availability: "available",
+          provider: "official_api",
+          providerLabel: "Official API",
+          authMode: "manual_token",
+          ingestionMode: "transcripts_only",
+          sourceFocus: "meeting_transcripts",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    expect(screen.getByText("Manual polling")).toBeInTheDocument();
+    expect(screen.getByText(/This connector stays polling-only/i)).toBeInTheDocument();
+    expect(screen.getByText("Transcript-only ingestion · meeting transcripts")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Upgrade to Zoom OAuth" })).toHaveAttribute(
+      "href",
+      "/api/connectors/zoom/install?workspace_id=ws_1",
+    );
+  });
+
+  it("shows webhook-backed guidance for Zoom OAuth connectors", () => {
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "zoom",
+          connectorId: "conn_zoom",
+          name: "Zoom",
+          description: "Meeting transcripts",
+          status: "connected",
+          lastSync: "Apr 1, 2026, 10:00 AM",
+          itemsSynced: 14,
+          color: "#0B5CFF",
+          availability: "available",
+          provider: "official_api",
+          providerLabel: "Official API",
+          authMode: "oauth",
+          accountId: "acct_123",
+          lastWebhookEvent: "recording.transcript_completed",
+          lastWebhookReceivedAt: "Apr 1, 2026, 10:05 AM",
+          syncModeNote: "Webhook auto-sync handles transcript completion events.",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    expect(screen.getByText("OAuth auto-sync")).toBeInTheDocument();
+    expect(screen.getByText(/Webhook-triggered sync is enabled/i)).toBeInTheDocument();
+    expect(screen.getByText("Account: acct_123")).toBeInTheDocument();
+    expect(screen.getByText(/Last webhook: recording\.transcript_completed · Apr 1, 2026, 10:05 AM/i)).toBeInTheDocument();
+    expect(screen.getByText("Webhook auto-sync handles transcript completion events.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Refresh Zoom OAuth" })).toHaveAttribute(
+      "href",
+      "/api/connectors/zoom/install?workspace_id=ws_1",
+    );
   });
 
   it("renders connector processing counts from the summary endpoint", () => {

@@ -22,6 +22,7 @@ class SourceDocumentRead(BaseModel):
     created_at_source: datetime | None
     ingested_at: datetime
     processed_at: datetime | None
+    deleted_at: datetime | None
     metadata: dict[str, Any]
 
 

@@ -24,9 +24,9 @@ beforeEach(() => {
   useComponentSources.mockReturnValue({ data: [], isLoading: false, isError: false });
 });
 
-function renderQuery() {
+function renderQuery({ initialEntries = ["/"] } = {}) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <Query />
     </MemoryRouter>,
   );
@@ -45,6 +45,20 @@ describe("Query — empty state", () => {
     renderQuery();
 
     expect(screen.getByText("Ask")).toBeDisabled();
+  });
+
+  it("prefills question, window, and as-of date from URL search params", () => {
+    renderQuery({
+      initialEntries: [
+        "/app/query?question=What%20is%20our%20current%20enterprise%20pricing%3F&window=30&as_of=2026-03-15",
+      ],
+    });
+
+    expect(screen.getByLabelText("Query input")).toHaveValue(
+      "What is our current enterprise pricing?",
+    );
+    expect(screen.getByLabelText("Context window")).toHaveValue("30");
+    expect(screen.getByLabelText("As of date")).toHaveValue("2026-03-15");
   });
 });
 
@@ -91,6 +105,26 @@ describe("Query — submit flow", () => {
     expect(mutate).toHaveBeenCalledWith({
       question: "What changed in pricing?",
       maxAgeDays: 7,
+    });
+  });
+
+  it("passes an as-of timestamp when historical mode is selected", async () => {
+    const mutate = vi.fn();
+    useContextQuery.mockReturnValue({ ...noopMut, mutate });
+
+    renderQuery();
+
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question about your company data..."),
+      "What did pricing look like before the change?",
+    );
+    await userEvent.type(screen.getByLabelText("As of date"), "2026-03-15");
+    await userEvent.click(screen.getByText("Ask"));
+
+    expect(mutate).toHaveBeenCalledWith({
+      question: "What did pricing look like before the change?",
+      maxAgeDays: null,
+      asOf: "2026-03-15T00:00:00.000Z",
     });
   });
 
@@ -455,6 +489,28 @@ describe("Query — real backend success response", () => {
     expect(screen.getByText("Window: last 7 days")).toBeInTheDocument();
   });
 
+  it("shows the selected as-of date on live backend answers", async () => {
+    const result = {
+      question: "What did pricing look like before the change?",
+      answer: "As of mid-March, pricing was still $500/seat.",
+      confidence: 0.82,
+      components: [],
+      sources: [],
+    };
+    useContextQuery.mockReturnValue({ ...noopMut, data: result, mutate: vi.fn() });
+
+    renderQuery();
+
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question about your company data..."),
+      "What did pricing look like before the change?",
+    );
+    await userEvent.type(screen.getByLabelText("As of date"), "2026-03-15");
+    await userEvent.click(screen.getByText("Ask"));
+
+    expect(screen.getByText("As of: Mar 15, 2026")).toBeInTheDocument();
+  });
+
   it("renders multiline causal answers as separate paragraphs", () => {
     const result = {
       question: "Why is MRR growing?",
@@ -535,6 +591,8 @@ describe("Query — real backend success response", () => {
                 connectorType: "notion",
                 author: "CEO",
                 extractionContext: "Approved during pricing review",
+                extractorName: "Structured extractor",
+                extractorSchemaVersion: "2",
               },
             ]
           : [],
@@ -565,6 +623,7 @@ describe("Query — real backend success response", () => {
     );
     expect(screen.getByText("Author: CEO")).toBeInTheDocument();
     expect(screen.getByText("Approved during pricing review")).toBeInTheDocument();
+    expect(screen.getByText("Extracted by Structured extractor · schema v2")).toBeInTheDocument();
   });
 
   it("splits current and historical components into separate sections", () => {
@@ -692,6 +751,31 @@ describe("Query — error state", () => {
     expect(mutate).toHaveBeenCalledWith({
       question: "What changed in onboarding?",
       maxAgeDays: 30,
+    });
+  });
+
+  it("retry preserves the selected as-of date", async () => {
+    const mutate = vi.fn();
+    useContextQuery.mockReturnValue({
+      ...noopMut,
+      mutate,
+      isError: true,
+      error: { message: "Server error" },
+    });
+
+    renderQuery();
+
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question about your company data..."),
+      "What was our onboarding policy?",
+    );
+    await userEvent.type(screen.getByLabelText("As of date"), "2026-02-01");
+    await userEvent.click(screen.getByText("Retry"));
+
+    expect(mutate).toHaveBeenCalledWith({
+      question: "What was our onboarding policy?",
+      maxAgeDays: null,
+      asOf: "2026-02-01T00:00:00.000Z",
     });
   });
 

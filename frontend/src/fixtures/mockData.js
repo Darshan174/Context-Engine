@@ -23,6 +23,150 @@ export const staleAlerts = [
   { id: 3, source: "Slack #eng-alerts", message: "Channel archived — reconnect needed", severity: "error" },
 ];
 
+// ── Accuracy / eval summary ──────────────────────────────────
+export const evalSummary = {
+  passRate: 0.72,
+  passedCases: 18,
+  totalCases: 25,
+  threshold: 0.7,
+  latestRunAt: "2026-04-01T09:30:00Z",
+  domains: [
+    { domain: "pricing", passRate: 0.8, passed: 4, total: 5 },
+    { domain: "blocker", passRate: 0.6, passed: 3, total: 5 },
+    { domain: "roadmap", passRate: 0.8, passed: 4, total: 5 },
+    { domain: "decision", passRate: 0.8, passed: 4, total: 5 },
+    { domain: "meeting", passRate: 0.6, passed: 3, total: 5 },
+  ],
+  metrics: [
+    { key: "retrieval_recall", label: "Retrieval recall", value: 0.84, target: 0.9, direction: "up" },
+    { key: "retrieval_precision", label: "Retrieval precision", value: 0.78, target: 0.85, direction: "up" },
+    { key: "answer_substring_coverage", label: "Answer coverage", value: 0.76, target: 0.85, direction: "up" },
+    { key: "extraction_source_coverage", label: "Extraction coverage", value: 0.81, target: 0.9, direction: "up" },
+    { key: "confidence_calibration_error", label: "Calibration error", value: 0.12, target: 0.08, direction: "down" },
+  ],
+  blockers: [
+    "Meeting and blocker domains still depend on a small seeded gold set.",
+    "Confidence calibration exists, but the current baseline still needs a stronger real-model run.",
+    "Semantic retrieval quality improves materially once a real embedding model is configured.",
+  ],
+};
+
+export const evalCasesByDomain = {
+  pricing: {
+    selectedDomain: "pricing",
+    cases: [
+      {
+        caseId: "pricing-1",
+        domain: "pricing",
+        question: "What is our current enterprise pricing?",
+        predictedConfidence: 0.89,
+        retrievalHitQuality: 0.92,
+        extractedFactCorrectness: 0.86,
+        finalAnswerCorrectness: 1,
+        passed: true,
+        detail: "Pulled the latest approved pricing decision from Slack and matched the current packaging copy.",
+      },
+      {
+        caseId: "pricing-2",
+        domain: "pricing",
+        question: "When does the $600 per seat pricing change take effect?",
+        predictedConfidence: 0.68,
+        retrievalHitQuality: 0.74,
+        extractedFactCorrectness: 0.62,
+        finalAnswerCorrectness: 0.6,
+        passed: false,
+        detail: "The answer found the pricing change but missed the timing nuance from the supporting source.",
+      },
+    ],
+  },
+  blocker: {
+    selectedDomain: "blocker",
+    cases: [
+      {
+        caseId: "blocker-1",
+        domain: "blocker",
+        question: "What is currently blocking the SSO rollout?",
+        predictedConfidence: 0.72,
+        retrievalHitQuality: 0.8,
+        extractedFactCorrectness: 0.7,
+        finalAnswerCorrectness: 0.64,
+        passed: false,
+        detail: "The blocker was found, but procurement timing and audit review were not combined cleanly.",
+      },
+      {
+        caseId: "blocker-2",
+        domain: "blocker",
+        question: "Who owns the current blocker for SSO?",
+        predictedConfidence: 0.61,
+        retrievalHitQuality: 0.58,
+        extractedFactCorrectness: 0.55,
+        finalAnswerCorrectness: 0.4,
+        passed: false,
+        detail: "Ownership is still weak because the source set is sparse and review decisions are incomplete.",
+      },
+    ],
+  },
+  roadmap: {
+    selectedDomain: "roadmap",
+    cases: [
+      {
+        caseId: "roadmap-1",
+        domain: "roadmap",
+        question: "What is the current SSO launch timeline?",
+        predictedConfidence: 0.83,
+        retrievalHitQuality: 0.86,
+        extractedFactCorrectness: 0.82,
+        finalAnswerCorrectness: 0.84,
+        passed: true,
+        detail: "Roadmap and decision sources align on the current target window.",
+      },
+    ],
+  },
+  decision: {
+    selectedDomain: "decision",
+    cases: [
+      {
+        caseId: "decision-1",
+        domain: "decision",
+        question: "Why did we choose SAML over OIDC?",
+        predictedConfidence: 0.85,
+        retrievalHitQuality: 0.87,
+        extractedFactCorrectness: 0.83,
+        finalAnswerCorrectness: 0.88,
+        passed: true,
+        detail: "The decision rationale is grounded in the roadmap page and linked discussion.",
+      },
+    ],
+  },
+  meeting: {
+    selectedDomain: "meeting",
+    cases: [
+      {
+        caseId: "meeting-1",
+        domain: "meeting",
+        question: "What did we decide in the latest product review meeting?",
+        predictedConfidence: 0.67,
+        retrievalHitQuality: 0.72,
+        extractedFactCorrectness: 0.63,
+        finalAnswerCorrectness: 0.58,
+        passed: false,
+        detail: "Transcript retrieval found the right meeting, but the extracted decision still needs calibration.",
+      },
+      {
+        caseId: "meeting-2",
+        domain: "meeting",
+        question: "What blocker came out of the weekly product review?",
+        predictedConfidence: 0.64,
+        retrievalHitQuality: 0.69,
+        extractedFactCorrectness: 0.6,
+        finalAnswerCorrectness: 0.54,
+        passed: false,
+        detail: "The meeting blocker is available in Zoom transcripts, but answer confidence is still too optimistic.",
+      },
+    ],
+  },
+};
+
 // ── Connectors ─────────────────────────────────────────────────
 export const connectors = [
   {
@@ -42,6 +186,15 @@ export const connectors = [
     lastSync: "6 hr ago",
     itemsSynced: 2_340,
     color: "#000000",
+  },
+  {
+    id: "zoom",
+    name: "Zoom",
+    description: "Meeting transcripts & recording metadata",
+    status: "connected",
+    lastSync: "42 min ago",
+    itemsSynced: 128,
+    color: "#0B5CFF",
   },
   {
     id: "drive",
@@ -162,6 +315,24 @@ export const sourceDocuments = [
     metadata: { channel_name: "product", location: "#product" },
   },
   {
+    id: "sd10",
+    connectorType: "zoom",
+    externalId: "zoom:987654321:transcript-file-1",
+    author: "founder@example.com",
+    content: "Meeting: Weekly Product Review\nHost: founder@example.com\nParticipants: Founder, Ops\n\nFounder: decision: Launch the pricing page next Tuesday.\nOps: blocker: waiting on legal approval.",
+    sourceUrl: "https://zoom.us/rec/play/transcript-file-1",
+    createdAtSource: "2026-03-31T10:00:05Z",
+    ingestedAt: "2026-03-31T10:16:00Z",
+    processedAt: "2026-03-31T10:18:00Z",
+    metadata: {
+      meeting_topic: "Weekly Product Review",
+      host: "founder@example.com",
+      participants: ["Founder", "Ops"],
+      recording_date: "2026-03-31",
+      source_type: "zoom_transcript",
+    },
+  },
+  {
     id: "sd9",
     connectorType: "gong",
     externalId: "gong:call-555",
@@ -197,6 +368,16 @@ export const reviewQueue = [
     rationale:
       "Two high-authority sources disagree on the current enterprise pricing decision. This should be resolved before external-facing docs or AI answers rely on it.",
     suggestedAction: "Choose the approved value and mark the superseded source.",
+    decisionHistory: [
+      {
+        id: "rqd1",
+        previousStatus: null,
+        newStatus: "needs_review",
+        actorType: "system",
+        note: "Conflict generated automatically during ingestion.",
+        createdAt: "2026-03-31T08:00:00Z",
+      },
+    ],
   },
   {
     id: "rq2",
@@ -218,6 +399,16 @@ export const reviewQueue = [
     rationale:
       "The same topic appears in multiple places, but the extracted blocker relationship needs a human to confirm the exact cause.",
     suggestedAction: "Confirm whether audit review or procurement timing is the canonical blocker.",
+    decisionHistory: [
+      {
+        id: "rqd2",
+        previousStatus: null,
+        newStatus: "needs_review",
+        actorType: "system",
+        note: "Low-confidence extraction triggered manual review.",
+        createdAt: "2026-03-31T05:00:00Z",
+      },
+    ],
   },
   {
     id: "rq3",
@@ -238,6 +429,24 @@ export const reviewQueue = [
     rationale:
       "This item already has clear supporting evidence and no contradictions.",
     suggestedAction: "No action needed.",
+    decisionHistory: [
+      {
+        id: "rqd3a",
+        previousStatus: null,
+        newStatus: "needs_review",
+        actorType: "system",
+        note: "Fact update queued for human confirmation.",
+        createdAt: "2026-03-30T08:00:00Z",
+      },
+      {
+        id: "rqd3b",
+        previousStatus: "needs_review",
+        newStatus: "approved",
+        actorType: "human",
+        note: "Confirmed against the roadmap page.",
+        createdAt: "2026-03-30T09:30:00Z",
+      },
+    ],
   },
   {
     id: "rq4",
@@ -258,6 +467,16 @@ export const reviewQueue = [
     rationale:
       "The system preserved the old fact for time-travel context, but it should not be treated as current truth.",
     suggestedAction: "No action needed unless the old note is still being cited in active workflows.",
+    decisionHistory: [
+      {
+        id: "rqd4a",
+        previousStatus: "needs_review",
+        newStatus: "superseded",
+        actorType: "system",
+        note: "A newer pricing fact replaced this one during reprocessing.",
+        createdAt: "2026-03-28T11:00:00Z",
+      },
+    ],
   },
 ];
 

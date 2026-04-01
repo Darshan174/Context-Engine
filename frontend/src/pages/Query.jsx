@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useComponentSources, useContextQuery } from "../api/hooks";
 import MockBadge from "../components/MockBadge";
 import SourceDocumentLinks from "../components/SourceDocumentLinks";
@@ -23,9 +24,15 @@ const WINDOW_OPTIONS = [
 ];
 
 export default function Query() {
+  const [searchParams] = useSearchParams();
   const [input, setInput] = useState("");
   const [windowDays, setWindowDays] = useState("all");
-  const [lastRequestMeta, setLastRequestMeta] = useState({ question: "", maxAgeDays: null });
+  const [asOfDate, setAsOfDate] = useState("");
+  const [lastRequestMeta, setLastRequestMeta] = useState({
+    question: "",
+    maxAgeDays: null,
+    asOf: null,
+  });
   const mutation = useContextQuery();
   const result = mutation.data;
   const components = result?.components ?? [];
@@ -38,16 +45,27 @@ export default function Query() {
     components.length === 0 &&
     (!result.sources || result.sources.length === 0);
 
+  useEffect(() => {
+    const nextQuestion = searchParams.get("question") ?? "";
+    const nextWindow = searchParams.get("window");
+    const nextAsOf = searchParams.get("as_of") ?? searchParams.get("asOf") ?? "";
+
+    setInput(nextQuestion);
+    setWindowDays(nextWindow && WINDOW_OPTIONS.some((option) => option.value === nextWindow) ? nextWindow : "all");
+    setAsOfDate(normalizeAsOfSearchParam(nextAsOf));
+  }, [searchParams]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const q = input.trim();
     if (!q) return;
-    const payload = buildQueryPayload(q, windowDays);
+    const payload = buildQueryPayload(q, windowDays, asOfDate);
     setLastRequestMeta({
       question: q,
       maxAgeDays: payload.maxAgeDays ?? null,
+      asOf: payload.asOf ?? null,
     });
-    mutation.mutate(payload.maxAgeDays != null ? payload : payload.question);
+    mutation.mutate(payload.maxAgeDays != null || payload.asOf ? payload : payload.question);
   };
 
   return (
@@ -100,8 +118,27 @@ export default function Query() {
               ))}
             </select>
           </label>
+          <label className="flex items-center gap-2 text-xs text-gray-500">
+            <span>As of</span>
+            <input
+              type="date"
+              value={asOfDate}
+              onChange={(e) => setAsOfDate(e.target.value)}
+              aria-label="As of date"
+              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+          </label>
+          {asOfDate && (
+            <button
+              type="button"
+              onClick={() => setAsOfDate("")}
+              className="text-[11px] font-medium text-gray-500 underline underline-offset-2 hover:text-gray-700"
+            >
+              Clear historical mode
+            </button>
+          )}
           <p className="text-[11px] text-gray-400">
-            Limit answers to recently verified context when you want a tighter temporal window.
+            Use a recent window for fresher truth, or set an as-of date to inspect historical context.
           </p>
         </div>
       </form>
@@ -125,12 +162,13 @@ export default function Query() {
           </p>
           <button
             onClick={() => {
-              const payload = buildQueryPayload(input.trim(), windowDays);
+              const payload = buildQueryPayload(input.trim(), windowDays, asOfDate);
               setLastRequestMeta({
                 question: input.trim(),
                 maxAgeDays: payload.maxAgeDays ?? null,
+                asOf: payload.asOf ?? null,
               });
-              mutation.mutate(payload.maxAgeDays != null ? payload : payload.question);
+              mutation.mutate(payload.maxAgeDays != null || payload.asOf ? payload : payload.question);
             }}
             disabled={!input.trim()}
             className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
@@ -154,6 +192,11 @@ export default function Query() {
             {lastRequestMeta.maxAgeDays != null && (
               <p className="text-xs text-amber-700">
                 Try widening the context window if this answer may depend on older company context.
+              </p>
+            )}
+            {lastRequestMeta.asOf && (
+              <p className="text-xs text-amber-700">
+                Try a more recent as-of date or clear historical mode if this answer depends on the current state of the company.
               </p>
             )}
             {!isMock && (
@@ -187,6 +230,11 @@ export default function Query() {
                 {lastRequestMeta.maxAgeDays != null && (
                   <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                     Window: {formatWindowLabel(lastRequestMeta.maxAgeDays)}
+                  </span>
+                )}
+                {lastRequestMeta.asOf && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                    As of: {formatAsOfLabel(lastRequestMeta.asOf)}
                   </span>
                 )}
                 <span>
@@ -321,12 +369,13 @@ export default function Query() {
                 key={q}
                 onClick={() => {
                   setInput(q);
-                  const payload = buildQueryPayload(q, windowDays);
+                  const payload = buildQueryPayload(q, windowDays, asOfDate);
                   setLastRequestMeta({
                     question: q,
                     maxAgeDays: payload.maxAgeDays ?? null,
+                    asOf: payload.asOf ?? null,
                   });
-                  mutation.mutate(payload.maxAgeDays != null ? payload : payload.question);
+                  mutation.mutate(payload.maxAgeDays != null || payload.asOf ? payload : payload.question);
                 }}
                 className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
               >
@@ -454,16 +503,44 @@ function SearchIcon() {
   );
 }
 
-function buildQueryPayload(question, windowDays) {
+function buildQueryPayload(question, windowDays, asOfDate = "") {
   const trimmed = question.trim();
   const days = windowDays === "all" ? null : Number(windowDays);
+  const asOf =
+    typeof asOfDate === "string" && asOfDate.trim()
+      ? new Date(`${asOfDate}T00:00:00Z`).toISOString()
+      : null;
   return {
     question: trimmed,
     maxAgeDays: Number.isFinite(days) ? days : null,
+    ...(asOf ? { asOf } : {}),
   };
 }
 
 function formatWindowLabel(days) {
   if (days == null) return "All time";
   return `last ${days} day${days === 1 ? "" : "s"}`;
+}
+
+function formatAsOfLabel(value) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function normalizeAsOfSearchParam(value) {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  try {
+    return new Date(value).toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
 }

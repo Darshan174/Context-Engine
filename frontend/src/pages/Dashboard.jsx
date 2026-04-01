@@ -3,8 +3,10 @@ import {
   useConnectorProcessingSummary,
   useConnectors,
   useDashboard,
+  useEvalSummary,
   useReviewQueue,
 } from "../api/hooks";
+import MockBadge from "../components/MockBadge";
 import StatusView from "../components/StatusView";
 
 const DESTINATIONS = {
@@ -16,6 +18,7 @@ const DESTINATIONS = {
 export default function Dashboard() {
   const query = useDashboard();
   const reviewQuery = useReviewQueue();
+  const evalQuery = useEvalSummary();
   const connectorsQuery = useConnectors();
   const processingQuery = useConnectorProcessingSummary();
 
@@ -43,6 +46,20 @@ export default function Dashboard() {
     (total, item) => total + Number(item.unprocessedDocuments ?? 0),
     0,
   );
+  const accuracySummary = evalQuery.data;
+  const accuracyThreshold = accuracySummary?.threshold ?? null;
+  const accuracyPassRate = accuracySummary?.passRate ?? null;
+  const atRiskDomains = (accuracySummary?.domains ?? []).filter(
+    (domain) =>
+      accuracyThreshold != null &&
+      domain.passRate != null &&
+      domain.passRate < accuracyThreshold,
+  ).length;
+  const accuracyBlockers = accuracySummary?.blockers?.length ?? 0;
+  const accuracyHealthy =
+    accuracyPassRate != null &&
+    accuracyThreshold != null &&
+    accuracyPassRate >= accuracyThreshold;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -130,6 +147,49 @@ export default function Dashboard() {
           </p>
         )}
       </div>
+
+      {accuracySummary && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-gray-700">Accuracy Status</h3>
+                {evalQuery.isMock && <MockBadge />}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Eval pass rate, domain risk, and remaining blockers before trust claims get stronger.
+              </p>
+            </div>
+            <Link to="/app/accuracy" className="text-xs font-medium text-brand-700 hover:text-brand-800">
+              Open accuracy dashboard
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <TrustCard
+              label="Pass rate"
+              value={formatPercent(accuracyPassRate)}
+              tone={accuracyHealthy ? "emerald" : "amber"}
+              to="/app/accuracy"
+            />
+            <TrustCard
+              label="At-risk domains"
+              value={atRiskDomains}
+              tone={atRiskDomains > 0 ? "amber" : "slate"}
+              to="/app/accuracy"
+            />
+            <TrustCard
+              label="Open blockers"
+              value={accuracyBlockers}
+              tone={accuracyBlockers > 0 ? "red" : "slate"}
+              to="/app/accuracy"
+            />
+          </div>
+          <p className={`mt-4 text-xs ${accuracyHealthy ? "text-emerald-700" : "text-amber-700"}`}>
+            Latest eval run {formatDateTime(accuracySummary.latestRunAt)}.
+            {accuracyThreshold != null ? ` Current gate ${formatPercent(accuracyThreshold)}.` : ""}
+          </p>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-start justify-between gap-4">
@@ -232,6 +292,7 @@ export default function Dashboard() {
 function TrustCard({ label, value, tone, to }) {
   const toneClasses = {
     amber: "bg-amber-50 border-amber-200 text-amber-800",
+    emerald: "bg-emerald-50 border-emerald-200 text-emerald-800",
     red: "bg-red-50 border-red-200 text-red-800",
     slate: "bg-slate-50 border-slate-200 text-slate-700",
   };
@@ -245,6 +306,20 @@ function TrustCard({ label, value, tone, to }) {
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </Link>
   );
+}
+
+function formatPercent(value) {
+  if (value == null) return "—";
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
 }
 
 function PipelineCard({ connector, processing }) {

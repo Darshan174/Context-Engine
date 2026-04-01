@@ -91,6 +91,10 @@ class Component(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "components"
     __table_args__ = (
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="components_confidence_range"),
+        CheckConstraint(
+            "authority_weight >= 0 AND authority_weight <= 1",
+            name="components_authority_weight_range",
+        ),
     )
 
     model_id: Mapped[UUID] = mapped_column(
@@ -103,6 +107,12 @@ class Component(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     authority_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    authority_weight: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.5,
+        server_default=text("0.5"),
+    )
     valid_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -163,6 +173,12 @@ class Component(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     @property
+    def model_name(self) -> str | None:
+        if self.model is None:
+            return None
+        return self.model.name
+
+    @property
     def review_status(self) -> str | None:
         if self.review_item is None:
             return None
@@ -179,6 +195,12 @@ class Component(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         if self.review_item is None:
             return None
         return self.review_item.id
+
+    @property
+    def decision_history(self):
+        if self.review_item is None:
+            return []
+        return list(self.review_item.decision_history)
 
     @property
     def temporal_state(self) -> str | None:
@@ -305,6 +327,15 @@ class ComponentSource(Base):
         primary_key=True,
     )
     extraction_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    extracted_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extractor_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    extractor_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    extractor_schema_version: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
 
     component: Mapped["Component"] = orm_relationship(back_populates="source_links")
     source_document: Mapped["SourceDocument"] = orm_relationship(back_populates="component_links")

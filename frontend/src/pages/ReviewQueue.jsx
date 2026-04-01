@@ -3,7 +3,12 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import MockBadge from "../components/MockBadge";
 import SourceDocumentLinks from "../components/SourceDocumentLinks";
 import StatusView from "../components/StatusView";
-import { useApproveReviewItem, useRejectReviewItem, useReviewQueue } from "../api/hooks";
+import {
+  useApproveReviewItem,
+  useRejectReviewItem,
+  useReviewQueue,
+  useSupersedeReviewItem,
+} from "../api/hooks";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All statuses" },
@@ -52,6 +57,7 @@ export default function ReviewQueue() {
   const isMock = query.isMock ?? false;
   const approveMut = useApproveReviewItem();
   const rejectMut = useRejectReviewItem();
+  const supersedeMut = useSupersedeReviewItem();
   const [selectedId, setSelectedId] = useState(null);
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
@@ -343,6 +349,51 @@ export default function ReviewQueue() {
                   </div>
                 )}
 
+                {selectedItem.lastSeenAt && (
+                  <p className="text-[11px] text-gray-400">
+                    Last seen {formatDateTime(selectedItem.lastSeenAt)}
+                  </p>
+                )}
+
+                {selectedItem.decisionHistory?.length > 0 && (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400">Decision history</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Audit trail for review actions and automated state transitions.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      {selectedItem.decisionHistory.map((decision) => (
+                        <div
+                          key={decision.id ?? `${decision.createdAt}-${decision.newStatus}`}
+                          className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-700">
+                                {formatDecisionTransition(decision)}
+                              </p>
+                              <p className="mt-1 text-[11px] text-gray-500">
+                                {formatDecisionActor(decision.actorType)}
+                                {decision.createdAt ? ` · ${formatDateTime(decision.createdAt)}` : ""}
+                              </p>
+                            </div>
+                            {decision.newStatus && (
+                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_PILL[decision.newStatus] ?? STATUS_PILL.needs_review}`}>
+                                {decision.newStatus.replaceAll("_", " ")}
+                              </span>
+                            )}
+                          </div>
+                          {decision.note && (
+                            <p className="mt-2 text-xs text-gray-600">{decision.note}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {actionMessage && (
                   <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
                     {actionMessage}
@@ -354,7 +405,7 @@ export default function ReviewQueue() {
                   </p>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <button
                     type="button"
                     disabled={
@@ -379,6 +430,32 @@ export default function ReviewQueue() {
                     className="px-4 py-2 rounded-lg bg-emerald-100 text-emerald-700 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {approveMut.isPending && approveMut.variables === selectedItem.id ? "Approving..." : "Approve"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      isMock ||
+                      selectedItem.status === "superseded" ||
+                      selectedItem.status === "rejected" ||
+                      (supersedeMut.isPending && supersedeMut.variables === selectedItem.id)
+                    }
+                    onClick={() => {
+                      setActionMessage("");
+                      setActionError("");
+                      supersedeMut.mutate(selectedItem.id, {
+                        onSuccess: (item) => {
+                          setActionMessage(
+                            `${item.title} marked ${item.status.replaceAll("_", " ")}.`,
+                          );
+                        },
+                        onError: (err) => {
+                          setActionError(err?.message || "Failed to supersede review item.");
+                        },
+                      });
+                    }}
+                    className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {supersedeMut.isPending && supersedeMut.variables === selectedItem.id ? "Superseding..." : "Supersede"}
                   </button>
                   <button
                     type="button"
@@ -423,6 +500,34 @@ export default function ReviewQueue() {
       )}
     </div>
   );
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function formatDecisionTransition(decision) {
+  const previous = decision.previousStatus;
+  const next = decision.newStatus;
+  if (previous && next) {
+    return `${previous.replaceAll("_", " ")} -> ${next.replaceAll("_", " ")}`;
+  }
+  if (next) {
+    return `Marked ${next.replaceAll("_", " ")}`;
+  }
+  return "State updated";
+}
+
+function formatDecisionActor(actorType) {
+  if (!actorType) return "Unknown actor";
+  if (actorType === "system") return "System";
+  if (actorType === "human") return "Human reviewer";
+  return actorType.replaceAll("_", " ");
 }
 
 function SummaryCard({ label, value, tone }) {

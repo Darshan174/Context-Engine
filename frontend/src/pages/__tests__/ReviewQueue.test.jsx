@@ -7,9 +7,15 @@ vi.mock("../../api/hooks", () => ({
   useApproveReviewItem: vi.fn(),
   useRejectReviewItem: vi.fn(),
   useReviewQueue: vi.fn(),
+  useSupersedeReviewItem: vi.fn(),
 }));
 
-import { useApproveReviewItem, useRejectReviewItem, useReviewQueue } from "../../api/hooks";
+import {
+  useApproveReviewItem,
+  useRejectReviewItem,
+  useReviewQueue,
+  useSupersedeReviewItem,
+} from "../../api/hooks";
 
 const approveMut = {
   mutate: vi.fn(),
@@ -18,6 +24,12 @@ const approveMut = {
 };
 
 const rejectMut = {
+  mutate: vi.fn(),
+  isPending: false,
+  variables: undefined,
+};
+
+const supersedeMut = {
   mutate: vi.fn(),
   isPending: false,
   variables: undefined,
@@ -33,6 +45,7 @@ const baseItems = [
     summary: "Slack says $600/seat, Notion still says $500/seat.",
     confidence: 0.58,
     freshness: "2 hr ago",
+    lastSeenAt: "2026-03-31T10:00:00Z",
     model: "Pricing Strategy",
     modelId: "pricing",
     sources: ["Slack #pricing", "Notion Pricing Strategy"],
@@ -42,6 +55,16 @@ const baseItems = [
     ],
     rationale: "Two high-authority sources disagree on the current price.",
     suggestedAction: "Choose the approved value and mark the old source superseded.",
+    decisionHistory: [
+      {
+        id: "rqd1",
+        previousStatus: null,
+        newStatus: "needs_review",
+        actorType: "system",
+        note: "Conflict generated automatically during ingestion.",
+        createdAt: "2026-03-31T09:00:00Z",
+      },
+    ],
   },
   {
     id: "rq2",
@@ -60,6 +83,7 @@ const baseItems = [
     ],
     rationale: "The blocker is ambiguous between audit review and procurement timing.",
     suggestedAction: "Confirm the canonical blocker.",
+    decisionHistory: [],
   },
   {
     id: "rq3",
@@ -78,6 +102,16 @@ const baseItems = [
     ],
     rationale: "No action needed.",
     suggestedAction: "No action needed.",
+    decisionHistory: [
+      {
+        id: "rqd3a",
+        previousStatus: "needs_review",
+        newStatus: "approved",
+        actorType: "human",
+        note: "Confirmed against the roadmap page.",
+        createdAt: "2026-03-30T10:00:00Z",
+      },
+    ],
   },
 ];
 
@@ -96,8 +130,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   approveMut.mutate.mockReset();
   rejectMut.mutate.mockReset();
+  supersedeMut.mutate.mockReset();
   useApproveReviewItem.mockReturnValue(approveMut);
   useRejectReviewItem.mockReturnValue(rejectMut);
+  useSupersedeReviewItem.mockReturnValue(supersedeMut);
 });
 
 describe("ReviewQueue", () => {
@@ -129,8 +165,29 @@ describe("ReviewQueue", () => {
     expect(within(detail).getByText("Enterprise pricing changed across Slack and Notion")).toBeInTheDocument();
     expect(within(detail).getByText(/Two high-authority sources disagree/)).toBeInTheDocument();
     expect(within(detail).getByText("Slack #pricing")).toBeInTheDocument();
+    expect(within(detail).getByText(/Last seen/)).toBeInTheDocument();
+    expect(within(detail).getByText("Decision history")).toBeInTheDocument();
+    expect(within(detail).getByText("Marked needs review")).toBeInTheDocument();
+    expect(within(detail).getByText(/System · /)).toBeInTheDocument();
+    expect(within(detail).getByText("Conflict generated automatically during ingestion.")).toBeInTheDocument();
     expect(within(detail).getByRole("link", { name: "Pricing Strategy" })).toHaveAttribute("href", "/app/model/pricing");
     expect(within(detail).getByRole("link", { name: /#pricing enterprise decision/ })).toHaveAttribute("href", "/app/sources/sd1");
+  });
+
+  it("renders a full transition in decision history when previous status exists", () => {
+    useReviewQueue.mockReturnValue({
+      data: baseItems,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    renderReviewQueue("/app/review/rq3");
+
+    const detail = screen.getByRole("region", { name: "Review detail" });
+    expect(within(detail).getByText("needs review -> approved")).toBeInTheDocument();
+    expect(within(detail).getByText(/Human reviewer/)).toBeInTheDocument();
+    expect(within(detail).getByText("Confirmed against the roadmap page.")).toBeInTheDocument();
   });
 
   it("filters by status and severity", async () => {
@@ -254,6 +311,7 @@ describe("ReviewQueue", () => {
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
     expect(screen.getByText(/staged in demo mode/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Supersede" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
   });
 
@@ -291,6 +349,27 @@ describe("ReviewQueue", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reject" }));
 
     expect(rejectMut.mutate).toHaveBeenCalledWith(
+      "rq1",
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it("calls supersede mutation for a live review item", async () => {
+    useReviewQueue.mockReturnValue({
+      data: baseItems,
+      isMock: false,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    renderReviewQueue();
+    await userEvent.click(screen.getByRole("button", { name: "Supersede" }));
+
+    expect(supersedeMut.mutate).toHaveBeenCalledWith(
       "rq1",
       expect.objectContaining({
         onSuccess: expect.any(Function),

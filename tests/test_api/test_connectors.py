@@ -766,7 +766,7 @@ class TestNotionConnect:
 # ── Source document browsing ────────────────────────────────────────
 
 
-def _make_source_doc(connector, external_id, content, *, processed=False):
+def _make_source_doc(connector, external_id, content, *, processed=False, deleted=False):
     """Helper to create a SourceDocument row."""
     from datetime import datetime, timezone
 
@@ -780,6 +780,8 @@ def _make_source_doc(connector, external_id, content, *, processed=False):
     )
     if processed:
         doc.processed_at = datetime.now(timezone.utc)
+    if deleted:
+        doc.deleted_at = datetime.now(timezone.utc)
     return doc
 
 
@@ -894,6 +896,33 @@ class TestListSourceDocuments:
         assert body["total"] == 1
         assert body["items"][0]["external_id"] == "u1"
         assert body["items"][0]["processed_at"] is None
+
+    async def test_list_excludes_deleted_documents(
+        self, client, workspace, db_session
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.ZOOM,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        db_session.add_all([
+            _make_source_doc(conn, "active-doc", "Active transcript"),
+            _make_source_doc(conn, "deleted-doc", "Deleted transcript", deleted=True),
+        ])
+        await db_session.flush()
+
+        resp = await client.get(
+            "/api/source-documents",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert [item["external_id"] for item in body["items"]] == ["active-doc"]
 
     async def test_list_pagination(self, client, workspace, db_session):
         conn = Connector(
@@ -1164,6 +1193,28 @@ class TestGetSourceDocument:
         assert body["content"] == "Page content here"
         assert body["connector_type"] == "notion"
 
+    async def test_get_deleted_document_returns_404(
+        self, client, workspace, db_session
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.ZOOM,
+            status=ConnectorStatus.CONNECTED,
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        doc = _make_source_doc(conn, "deleted-zoom-doc", "Transcript", deleted=True)
+        db_session.add(doc)
+        await db_session.flush()
+
+        resp = await client.get(
+            f"/api/source-documents/{doc.id}",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 404
+
     async def test_get_missing_document_returns_404(self, client, workspace):
         resp = await client.get(
             f"/api/source-documents/{uuid4()}",
@@ -1294,3 +1345,104 @@ class TestProcessingSummary:
             params={"workspace_id": str(uuid4())},
         )
         assert resp.status_code == 404
+
+
+# ── Connector Hardening (Slice 4) ─────────────────────────────────
+
+
+class TestConnectorHardening:
+    """Structured last_error and Notion sync_mode_note."""
+
+    def _setup(self, monkeypatch):
+        monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
+
+    async def _make_connector(self, db_session, workspace, connector_type=ConnectorType.SLACK):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=connector_type,
+            status=ConnectorStatus.CONNECTED,
+            oauth_token_encrypted=encrypt_token("test-token"),
+            config={},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+        return conn
+
+    async def test_auth_failure_stores_last_error_in_config(
+        self, db_session, workspace, monkeypatch
+    ):
+        """AuthenticationError stores structured last_error in connector.config."""
+        self._setup(monkeypatch)
+        import app.services.sync_service as sync_module
+        from app.connectors.base import AuthenticationError
+        from app.services.sync_service import SyncExecutor
+
+        conn = await self._make_connector(db_session, workspace)
+        conn_id = conn.id
+
+        mock_impl = AsyncMock()
+        async def _raise_auth():
+            raise AuthenticationError("token_revoked")
+            yield  # make it an async generator
+        mock_impl.fetch_initial = _raise_auth
+
+        monkeypatch.setattr(
+            sync_module.SyncExecutor,
+            "_resolve_connector",
+            lambda self, ct, token: mock_impl,
+        )
+
+        import pytest
+        with pytest.raises(Exception):
+            await SyncExecutor(db_session).run(conn, "test-token")
+
+        db_session.expire_all()
+        refreshed = await db_session.scalar(
+            select(Connector).where(Connector.id == conn_id)
+        )
+        assert "last_error" in refreshed.config
+        assert "error_type" in refreshed.config["last_error"]
+        assert "error_message" in refreshed.config["last_error"]
+        assert "failed_at" in refreshed.config["last_error"]
+
+    async def test_notion_sync_stores_sync_mode_note(
+        self, db_session, workspace, monkeypatch
+    ):
+        """After a successful Notion sync, sync_mode_note is set in connector.config."""
+        self._setup(monkeypatch)
+        import app.services.sync_service as sync_module
+        from app.services.sync_service import SyncExecutor
+
+        conn = await self._make_connector(db_session, workspace, ConnectorType.NOTION)
+        conn_id = conn.id
+
+        sample_docs = [
+            NormalizedDocument(
+                external_id="notion:page-1",
+                content="decision: prioritize mobile",
+                author="founder@example.com",
+                source_url="https://notion.so/page-1",
+            ),
+        ]
+
+        async def _mock_fetch():
+            for d in sample_docs:
+                yield d
+
+        mock_impl = AsyncMock()
+        mock_impl.fetch_initial = _mock_fetch
+
+        monkeypatch.setattr(
+            sync_module.SyncExecutor,
+            "_resolve_connector",
+            lambda self, ct, token: mock_impl,
+        )
+
+        await SyncExecutor(db_session).run(conn, "ntn_test_token")
+
+        db_session.expire_all()
+        refreshed = await db_session.scalar(
+            select(Connector).where(Connector.id == conn_id)
+        )
+        assert "sync_mode_note" in refreshed.config
+        assert "Notion API limitation" in refreshed.config["sync_mode_note"]

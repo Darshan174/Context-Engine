@@ -6,10 +6,11 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from app.models.connector import Connector, ConnectorStatus
 from app.models.knowledge import Component, ComponentSource, KnowledgeModel
-from app.models.review import ReviewItem
+from app.models.review import ReviewDecision, ReviewItem
 from app.models.source import ConnectorType, SourceDocument
 
 # ---------------------------------------------------------------------------
@@ -156,6 +157,19 @@ class TestGetComponent:
             )
         )
         await db_session.flush()
+        review_item = await db_session.scalar(
+            select(ReviewItem).where(ReviewItem.component_id == component.id)
+        )
+        db_session.add(
+            ReviewDecision(
+                review_item_id=review_item.id,
+                previous_status=None,
+                new_status="needs_review",
+                actor_type="system",
+                note="Created by test.",
+            )
+        )
+        await db_session.flush()
 
         resp = await client.get(f"/api/components/{component.id}")
         assert resp.status_code == 200
@@ -166,6 +180,8 @@ class TestGetComponent:
         assert body["review_status"] == "needs_review"
         assert body["review_item_id"] is not None
         assert body["review_summary"] == "Launch Date still needs review."
+        assert body["decision_history"][0]["new_status"] == "needs_review"
+        assert body["decision_history"][0]["actor_type"] == "system"
         assert body["temporal_state"] is None
         assert body["source_documents"] == [
             {
@@ -213,6 +229,56 @@ class TestAddComponent:
         body = resp.json()
         ids = [c["id"] for c in body["components"]]
         assert created_component["id"] in ids
+
+    async def test_model_detail_includes_component_decision_history(
+        self, client, db_session, workspace
+    ):
+        model = KnowledgeModel(
+            workspace_id=workspace.id,
+            name="Pricing",
+            description="All pricing info",
+        )
+        db_session.add(model)
+        await db_session.flush()
+
+        component = Component(
+            model_id=model.id,
+            name="Enterprise Price",
+            value="$600/seat",
+            confidence=0.6,
+        )
+        db_session.add(component)
+        await db_session.flush()
+
+        review_item = ReviewItem(
+            component_id=component.id,
+            status="approved",
+            severity="low",
+            kind="review_item",
+            title="Approved pricing fact",
+            summary="Pricing has been reviewed.",
+            confidence=0.9,
+        )
+        db_session.add(review_item)
+        await db_session.flush()
+
+        db_session.add(
+            ReviewDecision(
+                review_item_id=review_item.id,
+                previous_status="needs_review",
+                new_status="approved",
+                actor_type="operator",
+                note="Approved by test.",
+            )
+        )
+        await db_session.flush()
+
+        resp = await client.get(f"/api/models/{model.id}")
+        assert resp.status_code == 200
+
+        component_body = resp.json()["components"][0]
+        assert component_body["decision_history"][0]["new_status"] == "approved"
+        assert component_body["decision_history"][0]["actor_type"] == "operator"
 
 
 # ---------------------------------------------------------------------------

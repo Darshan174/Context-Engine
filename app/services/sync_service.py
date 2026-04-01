@@ -6,11 +6,12 @@ Neither ConnectorService nor the API endpoint should duplicate this logic.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import case, literal_column, select
+from sqlalchemy import case, func, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,14 +32,6 @@ class SyncResult:
     documents_processed: int
     sync_mode: str  # "initial" | "incremental"
     connector_type: ConnectorType
-
-
-def _document_count(config: dict) -> int:
-    try:
-        return int(config.get("document_count", 0) or 0)
-    except (TypeError, ValueError):
-        return 0
-
 
 class SyncExecutor:
     """Executes the full fetch→persist→ingest cycle for one connector.
@@ -62,8 +55,6 @@ class SyncExecutor:
 
         # Legacy cursor migration: prefer SyncState, fall back to config
         cursor = sync_state.cursor or connector.config.get("sync_cursor")
-        previous_count = _document_count(connector.config)
-
         # Mark in-progress
         connector.config = {
             **connector.config,
@@ -73,23 +64,25 @@ class SyncExecutor:
         await self.session.flush()
 
         documents: list[NormalizedDocument] = []
-        latest_ts: str | None = cursor
+        latest_cursor: str | None = cursor
 
         try:
             if cursor is None:
                 async for doc in impl.fetch_initial():
                     documents.append(doc)
-                    if doc.created_at:
-                        ts = str(doc.created_at.timestamp())
-                        if latest_ts is None or ts > latest_ts:
-                            latest_ts = ts
+                    latest_cursor = self._merge_cursor(
+                        connector.connector_type,
+                        latest_cursor,
+                        doc,
+                    )
             else:
                 async for doc in impl.fetch_incremental(cursor=cursor):
                     documents.append(doc)
-                    if doc.created_at:
-                        ts = str(doc.created_at.timestamp())
-                        if latest_ts is None or ts > latest_ts:
-                            latest_ts = ts
+                    latest_cursor = self._merge_cursor(
+                        connector.connector_type,
+                        latest_cursor,
+                        doc,
+                    )
 
             persisted = await self._persist_documents(
                 connector.id, connector.connector_type, documents
@@ -105,14 +98,14 @@ class SyncExecutor:
             completed_at = datetime.now(timezone.utc)
 
             # Update SyncState cursor
-            sync_state.cursor = latest_ts
+            sync_state.cursor = latest_cursor
             sync_state.last_synced_at = completed_at
             if documents:
                 sync_state.last_synced_item_id = documents[-1].external_id
 
             # Build clean config (remove transient keys)
             sync_mode = "initial" if cursor is None else "incremental"
-            total_count = persisted if cursor is None else previous_count + persisted
+            total_count = await self._count_active_documents(connector.id)
             prev_processed = connector.config.get("total_processed_count", 0)
             clean = {
                 k: v for k, v in connector.config.items()
@@ -186,11 +179,14 @@ class SyncExecutor:
     ) -> BaseConnector:
         from app.connectors.notion import NotionConnector
         from app.connectors.slack import SlackConnector
+        from app.connectors.zoom import ZoomConnector
 
         if connector_type == ConnectorType.SLACK:
             return SlackConnector(token)
         if connector_type == ConnectorType.NOTION:
             return NotionConnector(token)
+        if connector_type == ConnectorType.ZOOM:
+            return ZoomConnector(token)
         raise SyncError(f"No connector implementation for {connector_type.value}")
 
     async def _get_or_create_sync_state(self, connector: Connector) -> SyncState:
@@ -223,6 +219,7 @@ class SyncExecutor:
                 "source_url": doc.source_url,
                 "created_at_source": doc.created_at,
                 "metadata": doc.metadata or {},
+                "deleted_at": None,
             }
             for doc in documents
         ]
@@ -237,8 +234,15 @@ class SyncExecutor:
                 "source_url": stmt.excluded.source_url,
                 "created_at_source": stmt.excluded.created_at_source,
                 "metadata": stmt.excluded.metadata,
+                "deleted_at": None,
                 "processed_at": case(
-                    (sd.content != stmt.excluded.content, None),
+                    (
+                        or_(
+                            sd.content != stmt.excluded.content,
+                            sd.deleted_at.is_not(None),
+                        ),
+                        None,
+                    ),
                     else_=sd.processed_at,
                 ),
             },
@@ -246,3 +250,56 @@ class SyncExecutor:
         stmt = stmt.returning(literal_column("(xmax = 0)").label("inserted"))
         result = await self.session.execute(stmt)
         return sum(1 for row in result if row.inserted)
+
+    async def _count_active_documents(self, connector_id: UUID) -> int:
+        count = await self.session.scalar(
+            select(func.count())
+            .select_from(SourceDocument)
+            .where(
+                SourceDocument.connector_id == connector_id,
+                SourceDocument.deleted_at.is_(None),
+            )
+        )
+        return int(count or 0)
+
+    @staticmethod
+    def _merge_cursor(
+        connector_type: ConnectorType,
+        current_cursor: str | None,
+        document: NormalizedDocument,
+    ) -> str | None:
+        if document.created_at is None:
+            return current_cursor
+
+        if connector_type == ConnectorType.ZOOM:
+            current_ts: datetime | None = None
+            current_external_id: str = ""
+            if current_cursor:
+                try:
+                    payload = json.loads(current_cursor)
+                    current_ts = datetime.fromisoformat(
+                        payload["recording_start"].replace("Z", "+00:00")
+                    )
+                    current_external_id = str(payload.get("external_id") or "")
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    current_ts = None
+
+            candidate = {
+                "recording_start": document.created_at.isoformat(),
+                "external_id": document.external_id,
+            }
+            if (
+                current_ts is None
+                or document.created_at > current_ts
+                or (
+                    document.created_at == current_ts
+                    and document.external_id > current_external_id
+                )
+            ):
+                return json.dumps(candidate, sort_keys=True)
+            return current_cursor
+
+        ts = str(document.created_at.timestamp())
+        if current_cursor is None or ts > current_cursor:
+            return ts
+        return current_cursor

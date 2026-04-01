@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query as FastAPIQuery, status
@@ -24,6 +25,7 @@ async def query_context(
     models: list[str] | None = FastAPIQuery(default=None),
     min_confidence: float = FastAPIQuery(default=0.5, ge=0.0, le=1.0),
     max_age_days: int | None = FastAPIQuery(default=None, ge=0),
+    as_of: datetime | None = FastAPIQuery(default=None),
     service: QueryService = Depends(get_query_service),
 ) -> QueryResult:
     try:
@@ -34,6 +36,7 @@ async def query_context(
                 model_names=models,
                 min_confidence=min_confidence,
                 max_age_days=max_age_days,
+                as_of=as_of,
             ),
         )
     except QueryResourceNotFoundError as exc:

@@ -11,6 +11,7 @@ from app.database import get_db_session
 from app.schemas.connector import SyncJobResponse
 from app.schemas.review import (
     ComponentSourceRead,
+    ReviewDecisionRead,
     ReviewItemRead,
     ReviewKind,
     ReviewStatus,
@@ -34,18 +35,9 @@ def get_trust_service(session: AsyncSession = Depends(get_db_session)) -> TrustS
 
 
 def _serialize_source_document_ref(document) -> dict[str, object]:
-    metadata = document.metadata_json or {}
-    label = (
-        metadata.get("location")
-        or metadata.get("channel_name")
-        or metadata.get("page_title")
-        or metadata.get("page_id")
-        or document.author
-        or document.external_id
-    )
     return {
         "id": document.id,
-        "label": label,
+        "label": document.label,
         "connector_type": document.connector_type.value,
     }
 
@@ -79,6 +71,17 @@ def _serialize_review_item(item) -> ReviewItemRead:
         ],
         rationale=item.rationale,
         suggested_action=item.suggested_action,
+        decision_history=[
+            ReviewDecisionRead(
+                id=decision.id,
+                previous_status=decision.previous_status,
+                new_status=decision.new_status,
+                actor_type=decision.actor_type,
+                note=decision.note,
+                created_at=decision.created_at,
+            )
+            for decision in item.decision_history
+        ],
     )
 
 
@@ -179,7 +182,11 @@ async def list_component_sources(
             created_at_source=document.created_at_source,
             ingested_at=document.ingested_at,
             processed_at=document.processed_at,
+            deleted_at=document.deleted_at,
             extraction_context=link.extraction_context,
+            extractor_name=link.extractor_name,
+            extractor_kind=link.extractor_kind,
+            extractor_schema_version=link.extractor_schema_version,
         )
         for link, document in rows
     ]
@@ -221,6 +228,17 @@ async def list_source_document_components(
             review_status=review_item.status if review_item is not None else None,
             review_item_id=review_item.id if review_item is not None else None,
             review_summary=review_item.summary if review_item is not None else None,
+            decision_history=[
+                ReviewDecisionRead(
+                    id=decision.id,
+                    previous_status=decision.previous_status,
+                    new_status=decision.new_status,
+                    actor_type=decision.actor_type,
+                    note=decision.note,
+                    created_at=decision.created_at,
+                )
+                for decision in (review_item.decision_history if review_item is not None else [])
+            ],
             temporal_state=component.temporal_state,
         )
         for component, model, review_item in rows

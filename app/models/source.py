@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 class ConnectorType(str, enum.Enum):
     SLACK = "slack"
     NOTION = "notion"
+    ZOOM = "zoom"
     GDRIVE = "gdrive"
     GONG = "gong"
 
@@ -61,6 +62,12 @@ class SourceDocument(UUIDPrimaryKeyMixin, Base):
         nullable=True,
         default=None,
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+        index=True,
+    )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
@@ -87,6 +94,7 @@ class SourceDocument(UUIDPrimaryKeyMixin, Base):
         return (
             metadata.get("location")
             or metadata.get("channel_name")
+            or metadata.get("meeting_topic")
             or metadata.get("page_title")
             or metadata.get("page_id")
             or self.author

@@ -15,6 +15,7 @@ const CONNECTOR_OPTIONS = [
   { value: "all", label: "All connectors" },
   { value: "slack", label: "Slack" },
   { value: "notion", label: "Notion" },
+  { value: "zoom", label: "Zoom" },
   { value: "gdrive", label: "Google Drive" },
   { value: "gong", label: "Gong" },
 ];
@@ -28,6 +29,7 @@ const PROCESSED_OPTIONS = [
 const CONNECTOR_PILL = {
   slack: "bg-violet-100 text-violet-700",
   notion: "bg-gray-100 text-gray-700",
+  zoom: "bg-sky-100 text-sky-700",
   gdrive: "bg-emerald-100 text-emerald-700",
   gong: "bg-indigo-100 text-indigo-700",
   unknown: "bg-slate-100 text-slate-600",
@@ -168,7 +170,7 @@ export default function Sources() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search content, author, channel, page..."
+            placeholder="Search content, author, channel, page, or meeting..."
             aria-label="Search source documents"
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           />
@@ -372,6 +374,36 @@ export default function Sources() {
                   <dd className="text-gray-700">{selectedDocument.author || "Unknown"}</dd>
                   <dt className="text-gray-400">Location</dt>
                   <dd className="text-gray-700">{selectedDocument.location || "—"}</dd>
+                  {selectedDocument.meetingTopic && (
+                    <>
+                      <dt className="text-gray-400">Meeting</dt>
+                      <dd className="text-gray-700">{selectedDocument.meetingTopic}</dd>
+                    </>
+                  )}
+                  {selectedDocument.host && (
+                    <>
+                      <dt className="text-gray-400">Host</dt>
+                      <dd className="text-gray-700">{selectedDocument.host}</dd>
+                    </>
+                  )}
+                  {selectedDocument.participants?.length > 0 && (
+                    <>
+                      <dt className="text-gray-400">Participants</dt>
+                      <dd className="text-gray-700">{selectedDocument.participants.join(", ")}</dd>
+                    </>
+                  )}
+                  {selectedDocument.recordingDate && (
+                    <>
+                      <dt className="text-gray-400">Recording date</dt>
+                      <dd className="text-gray-700">{formatDate(selectedDocument.recordingDate)}</dd>
+                    </>
+                  )}
+                  {selectedDocument.sourceType && (
+                    <>
+                      <dt className="text-gray-400">Source type</dt>
+                      <dd className="text-gray-700">{selectedDocument.sourceType.replaceAll("_", " ")}</dd>
+                    </>
+                  )}
                   <dt className="text-gray-400">Created</dt>
                   <dd className="text-gray-700">{formatDate(selectedDocument.createdAtSource)}</dd>
                   <dt className="text-gray-400">Ingested</dt>
@@ -411,9 +443,33 @@ export default function Sources() {
                                   <p className="mt-1 text-xs text-gray-500 truncate">
                                     {component.modelName} · {component.value || "No extracted value"}
                                   </p>
+                                  {(component.temporalState || component.validFrom || component.validTo) && (
+                                    <p className="mt-1 text-[11px] text-gray-400 truncate">
+                                      {component.temporalState === "historical" || component.temporalState === "superseded"
+                                        ? "Historical version"
+                                        : "Current version"}
+                                      {component.validFrom ? ` · Active from ${formatDate(component.validFrom)}` : ""}
+                                      {component.validTo ? ` until ${formatDate(component.validTo)}` : ""}
+                                    </p>
+                                  )}
+                                  {component.reviewSummary && (
+                                    <p className="mt-1 text-[11px] text-gray-500 truncate">
+                                      {component.reviewSummary}
+                                    </p>
+                                  )}
                                 </div>
                                 {component.reviewStatus && (
-                                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                                  <span
+                                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                      component.reviewStatus === "approved"
+                                        ? "bg-emerald-100 text-emerald-700"
+                                        : component.reviewStatus === "superseded"
+                                          ? "bg-slate-100 text-slate-600"
+                                          : component.reviewStatus === "rejected"
+                                            ? "bg-red-100 text-red-700"
+                                            : "bg-amber-100 text-amber-700"
+                                    }`}
+                                  >
                                     {component.reviewStatus.replaceAll("_", " ")}
                                   </span>
                                 )}
@@ -433,14 +489,18 @@ export default function Sources() {
                       {reviewRefsQuery.data?.length ? (
                         <div className="space-y-2">
                           {reviewRefsQuery.data.map((item) => (
-                            <Link
+                            <div
                               key={item.id}
-                              to={`/app/review/${item.id}`}
-                              className="block rounded-lg border border-gray-200 bg-white px-3 py-2 hover:border-brand-200 hover:bg-brand-50 transition-colors"
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-3"
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-800 truncate">{item.title}</p>
+                                  <Link
+                                    to={`/app/review/${item.id}`}
+                                    className="text-sm font-medium text-gray-800 hover:text-brand-700"
+                                  >
+                                    {item.title}
+                                  </Link>
                                   <p className="mt-1 text-xs text-gray-500 truncate">
                                     {item.kind.replaceAll("_", " ")} · {item.model || "Unscoped"}
                                   </p>
@@ -451,13 +511,38 @@ export default function Sources() {
                                       ? "bg-emerald-100 text-emerald-700"
                                       : item.status === "superseded"
                                         ? "bg-slate-100 text-slate-600"
-                                        : "bg-amber-100 text-amber-700"
+                                        : item.status === "rejected"
+                                          ? "bg-red-100 text-red-700"
+                                          : "bg-amber-100 text-amber-700"
                                   }`}
                                 >
                                   {item.status.replaceAll("_", " ")}
                                 </span>
                               </div>
-                            </Link>
+                              {item.decisionHistory?.length > 0 && (
+                                <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                                    Decision history
+                                  </p>
+                                  <div className="mt-2 space-y-2">
+                                    {item.decisionHistory.map((decision) => (
+                                      <div key={decision.id ?? `${decision.createdAt}-${decision.newStatus}`} className="text-xs text-gray-600">
+                                        <p className="font-medium text-gray-700">
+                                          {formatReviewDecisionTransition(decision)}
+                                        </p>
+                                        <p className="mt-0.5 text-[11px] text-gray-500">
+                                          {formatDecisionActor(decision.actorType)}
+                                          {decision.createdAt ? ` · ${formatDate(decision.createdAt)}` : ""}
+                                        </p>
+                                        {decision.note && (
+                                          <p className="mt-1 text-[11px] text-gray-500">{decision.note}</p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           ))}
                         </div>
                       ) : (
@@ -495,4 +580,23 @@ function formatDate(value) {
   } catch {
     return value;
   }
+}
+
+function formatReviewDecisionTransition(decision) {
+  const previous = decision?.previousStatus;
+  const next = decision?.newStatus;
+  if (previous && next) {
+    return `${previous.replaceAll("_", " ")} -> ${next.replaceAll("_", " ")}`;
+  }
+  if (next) {
+    return `Marked ${next.replaceAll("_", " ")}`;
+  }
+  return "State updated";
+}
+
+function formatDecisionActor(actorType) {
+  if (!actorType) return "Unknown actor";
+  if (actorType === "system") return "System";
+  if (actorType === "human") return "Human reviewer";
+  return actorType.replaceAll("_", " ");
 }

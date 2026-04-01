@@ -10,6 +10,8 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tansta
 import { api } from "./client";
 import {
   dashboardStats,
+  evalCasesByDomain as mockEvalCasesByDomain,
+  evalSummary as mockEvalSummary,
   recentActivity,
   staleAlerts,
   connectors as mockConnectors,
@@ -68,6 +70,16 @@ const CONNECTOR_CATALOG = {
     provider: "dlt",
     providerLabel: "dlt",
     providerNote: "Powered by a dlt-backed connector path so we can reuse the substrate but keep our own storage and extraction pipeline.",
+  },
+  zoom: {
+    type: "zoom",
+    name: "Zoom",
+    description: "Meeting transcripts and recording metadata",
+    color: "#0B5CFF",
+    availability: "available",
+    provider: "official_api",
+    providerLabel: "Official API",
+    providerNote: "Transcript-first Zoom ingestion keeps the connector focused on high-signal meeting context instead of media processing.",
   },
   gdrive: {
     type: "gdrive",
@@ -530,6 +542,65 @@ export function useReviewQueue(filters = {}) {
   };
 }
 
+// ── Accuracy / eval summary ──────────────────────────────────
+
+export function useEvalSummary() {
+  const query = useQuery({
+    queryKey: ["eval-summary"],
+    queryFn: async () => {
+      const wsId = await getWorkspaceId();
+      if (!wsId) return { summary: null, isMock: false };
+
+      try {
+        const data = await api.get(`/evals/summary?workspace_id=${wsId}`);
+        return { summary: normalizeEvalSummary(data), isMock: false };
+      } catch (err) {
+        if (err.status && ![400, 404, 422, 501].includes(err.status)) {
+          throw err;
+        }
+        return { summary: normalizeEvalSummary(mockEvalSummary), isMock: true };
+      }
+    },
+  });
+
+  return {
+    ...query,
+    data: query.data?.summary ?? null,
+    isMock: query.data?.isMock ?? false,
+  };
+}
+
+export function useEvalCases(domain, { enabled = true } = {}) {
+  const query = useQuery({
+    queryKey: ["eval-cases", domain],
+    enabled: enabled && !!domain,
+    queryFn: async () => {
+      const wsId = await getWorkspaceId();
+      if (!wsId || !domain) return { payload: null, isMock: false };
+
+      const params = new URLSearchParams({ workspace_id: wsId, domain });
+      try {
+        const data = await api.get(`/evals/cases?${params.toString()}`);
+        return { payload: normalizeEvalCases(data), isMock: false };
+      } catch (err) {
+        if (err.status && ![400, 404, 422, 501].includes(err.status)) {
+          throw err;
+        }
+        return {
+          payload: normalizeEvalCases(mockEvalCasesByDomain[domain] ?? { selectedDomain: domain, cases: [] }),
+          isMock: true,
+        };
+      }
+    },
+  });
+
+  return {
+    ...query,
+    data: query.data?.payload ?? null,
+    isMock: query.data?.isMock ?? false,
+  };
+}
+
 // ── Knowledge Graph ────────────────────────────────────────────
 
 const MOCK_GRAPH = { nodes: mockGraphNodes, edges: mockGraphEdges };
@@ -558,15 +629,15 @@ const MOCK_QUERY_RESPONSE = mockQueryExamples;
  *   api.post("/query", { question, workspace_id })
  */
 export function useContextQuery() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input) => {
       const request =
         typeof input === "string"
-          ? { question: input, maxAgeDays: null }
+          ? { question: input, maxAgeDays: null, asOf: null }
           : {
               question: input?.question ?? "",
               maxAgeDays: input?.maxAgeDays ?? null,
+              asOf: input?.asOf ?? null,
             };
       try {
         const wsId = await getWorkspaceId();
@@ -574,6 +645,7 @@ export function useContextQuery() {
           question: request.question,
           workspace_id: wsId,
           ...(request.maxAgeDays != null ? { max_age_days: request.maxAgeDays } : {}),
+          ...(request.asOf ? { as_of: request.asOf } : {}),
         });
       } catch (err) {
         // Only fall back to mock on network errors (backend unreachable).
@@ -590,6 +662,7 @@ export function useContextQuery() {
           ...(match ?? MOCK_QUERY_RESPONSE[0]),
           question: request.question,
           answeredAt: "just now",
+          ...(request.asOf ? { asOf: request.asOf } : {}),
           _isMock: true,
         };
       }
@@ -710,6 +783,20 @@ export function useRejectReviewItem() {
   });
 }
 
+export function useSupersedeReviewItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reviewItemId) => api.post(`/review-items/${reviewItemId}/supersede`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["review-queue"] });
+      qc.invalidateQueries({ queryKey: ["source-document-review-items"] });
+      qc.invalidateQueries({ queryKey: ["source-document-components"] });
+      qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
 export function useReprocessSourceDocument() {
   const qc = useQueryClient();
   return useMutation({
@@ -750,6 +837,22 @@ export function useConnectNotion() {
   });
 }
 
+export function useConnectZoom() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ token }) => {
+      const wsId = await getWorkspaceId();
+      return api.post("/connectors/zoom/connect", { workspace_id: wsId, token });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["connectors"] });
+      qc.invalidateQueries({ queryKey: ["connector-processing-summary"] });
+      qc.invalidateQueries({ queryKey: ["source-documents"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
 function normalizeConnectors(data) {
   if (!Array.isArray(data)) return [];
 
@@ -763,9 +866,12 @@ function normalizeConnectors(data) {
         ...item,
         type,
         connectorId: null,
-        availability: type === "slack" ? "available" : "coming_soon",
+        availability: catalogItem.availability ?? "coming_soon",
         isInstalled: item.status === "connected" || item.status === "warning" || item.status === "error",
-        status: type === "slack" ? item.status : "coming_soon",
+        status:
+          catalogItem.availability === "available"
+            ? item.status
+            : "coming_soon",
         provider: item.provider ?? catalogItem.provider,
         providerLabel: item.providerLabel ?? catalogItem.providerLabel,
         providerNote: item.providerNote ?? catalogItem.providerNote,
@@ -812,8 +918,17 @@ function normalizeConnectors(data) {
       scope: record.config?.scope ?? null,
       syncQueuedAt: formatConnectorDate(record.config?.sync_queued_at, { fallback: null }),
       syncMode: record.config?.sync_mode ?? null,
+      syncModeNote: record.config?.sync_mode_note ?? null,
       processedCount: Number(record.config?.processed_count ?? 0),
       totalProcessedCount: Number(record.config?.total_processed_count ?? 0),
+      authMode: record.config?.auth_mode ?? null,
+      accountId: record.config?.account_id ?? null,
+      ingestionMode: record.config?.ingestion_mode ?? null,
+      sourceFocus: record.config?.source_focus ?? null,
+      lastWebhookEvent: record.config?.last_zoom_webhook_event ?? null,
+      lastWebhookReceivedAt: formatConnectorDate(record.config?.last_zoom_webhook_received_at, {
+        fallback: null,
+      }),
       provider: record.provider ?? catalogItem.provider,
       providerLabel: record.provider_label ?? catalogItem.providerLabel,
       providerNote: record.provider_note ?? catalogItem.providerNote,
@@ -859,11 +974,26 @@ function normalizeSourceDocuments(data) {
       location:
         metadata.location ??
         metadata.channel_name ??
+        metadata.meeting_topic ??
         metadata.team_name ??
         metadata.page_title ??
         metadata.page_id ??
         item.location ??
         null,
+      meetingTopic: metadata.meeting_topic ?? item.meetingTopic ?? item.meeting_topic ?? null,
+      host: metadata.host ?? item.host ?? null,
+      participants: Array.isArray(metadata.participants)
+        ? metadata.participants
+        : Array.isArray(item.participants)
+          ? item.participants
+          : [],
+      recordingDate: metadata.recording_date ?? item.recordingDate ?? item.recording_date ?? null,
+      transcriptTimestamp:
+        metadata.transcript_timestamp ??
+        item.transcriptTimestamp ??
+        item.transcript_timestamp ??
+        null,
+      sourceType: metadata.source_type ?? item.sourceType ?? item.source_type ?? null,
       metadata,
     };
   });
@@ -947,7 +1077,173 @@ function normalizeReviewItems(data) {
     sourceDocuments: item.sourceDocuments ?? item.source_documents ?? [],
     rationale: item.rationale ?? item.detail ?? "",
     suggestedAction: item.suggestedAction ?? item.suggested_action ?? null,
+    lastSeenAt: item.lastSeenAt ?? item.last_seen_at ?? null,
+    decisionHistory: normalizeReviewDecisionHistory(
+      item.decisionHistory ?? item.decision_history ?? [],
+    ),
   }));
+}
+
+function normalizeReviewDecisionHistory(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => ({
+    id: item.id,
+    previousStatus: item.previousStatus ?? item.previous_status ?? null,
+    newStatus: item.newStatus ?? item.new_status ?? null,
+    actorType: item.actorType ?? item.actor_type ?? null,
+    note: item.note ?? null,
+    createdAt: item.createdAt ?? item.created_at ?? null,
+  }));
+}
+
+function normalizeEvalSummary(data) {
+  if (!data || typeof data !== "object") return null;
+
+  const source = data.summary ?? data;
+  const domains = Array.isArray(source.domains)
+    ? source.domains
+    : Array.isArray(source.domain_summaries)
+      ? source.domain_summaries
+      : [];
+
+  return {
+    passRate: toNumber(
+      source.passRate ??
+        source.pass_rate ??
+        source.overall_pass_rate ??
+        source.passRateOverall,
+    ),
+    passedCases: toNumber(
+      source.passedCases ?? source.passed_cases ?? source.passed_count ?? source.total_passed ?? 0,
+    ),
+    totalCases: toNumber(
+      source.totalCases ?? source.total_cases ?? source.total ?? source.case_count ?? 0,
+    ),
+    threshold: toNumber(source.threshold ?? source.pass_threshold ?? null),
+    latestRunAt:
+      source.latestRunAt ??
+      source.latest_run_at ??
+      source.latest_run_timestamp ??
+      source.generated_at ??
+      null,
+    domains: domains.map((item) => ({
+      domain: item.domain ?? item.name ?? "unknown",
+      passRate: toNumber(item.passRate ?? item.pass_rate ?? 0),
+      passed: toNumber(item.passed ?? item.passed_cases ?? item.case_count ?? 0),
+      total: toNumber(item.total ?? item.total_cases ?? item.case_count ?? 0),
+    })),
+    metrics: normalizeEvalMetrics(
+      source.metrics ??
+        source.metric_summary ??
+        buildEvalMetricSummary(source),
+    ),
+    blockers: normalizeEvalBlockers(source.blockers ?? []),
+  };
+}
+
+function normalizeEvalMetrics(data) {
+  if (Array.isArray(data)) {
+    return data.map((item, index) => ({
+      key: item.key ?? item.metric ?? `metric_${index + 1}`,
+      label: item.label ?? item.metric ?? `Metric ${index + 1}`,
+      value: toNumber(item.value ?? 0),
+      target: toNumber(item.target ?? null),
+      direction: item.direction === "down" ? "down" : "up",
+    }));
+  }
+
+  if (!data || typeof data !== "object") return [];
+
+  return Object.entries(data).map(([key, value]) => ({
+    key,
+    label: key.replaceAll("_", " "),
+    value: toNumber(value ?? 0),
+    target: null,
+    direction: key.includes("error") ? "down" : "up",
+  }));
+}
+
+function buildEvalMetricSummary(source) {
+  const metrics = [];
+
+  if (source.average_retrieval_hit_quality != null) {
+    metrics.push({
+      key: "average_retrieval_hit_quality",
+      label: "Retrieval hit quality",
+      value: source.average_retrieval_hit_quality,
+      direction: "up",
+    });
+  }
+  if (source.average_extracted_fact_correctness != null) {
+    metrics.push({
+      key: "average_extracted_fact_correctness",
+      label: "Extracted fact correctness",
+      value: source.average_extracted_fact_correctness,
+      direction: "up",
+    });
+  }
+  if (source.average_final_answer_correctness != null) {
+    metrics.push({
+      key: "average_final_answer_correctness",
+      label: "Final answer correctness",
+      value: source.average_final_answer_correctness,
+      direction: "up",
+    });
+  }
+  if (source.confidence_calibration_error != null) {
+    metrics.push({
+      key: "confidence_calibration_error",
+      label: "Confidence calibration error",
+      value: source.confidence_calibration_error,
+      direction: "down",
+    });
+  }
+
+  return metrics;
+}
+
+function normalizeEvalCases(data) {
+  if (!data || typeof data !== "object") return null;
+
+  const source = data;
+  return {
+    selectedDomain: source.selectedDomain ?? source.selected_domain ?? null,
+    cases: normalizeEvalCaseItems(source.cases ?? []),
+  };
+}
+
+function normalizeEvalCaseItems(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => ({
+    caseId: item.caseId ?? item.case_id ?? null,
+    domain: item.domain ?? "unknown",
+    question: item.question ?? "Untitled eval case",
+    predictedConfidence: toNumber(item.predictedConfidence ?? item.predicted_confidence ?? null),
+    retrievalHitQuality: toNumber(item.retrievalHitQuality ?? item.retrieval_hit_quality ?? null),
+    extractedFactCorrectness: toNumber(
+      item.extractedFactCorrectness ?? item.extracted_fact_correctness ?? null,
+    ),
+    finalAnswerCorrectness: toNumber(
+      item.finalAnswerCorrectness ?? item.final_answer_correctness ?? null,
+    ),
+    passed: Boolean(item.passed),
+    detail: item.detail ?? "",
+  }));
+}
+
+function normalizeEvalBlockers(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) =>
+    typeof item === "string"
+      ? item
+      : item?.detail ?? item?.question ?? item?.case_id ?? "Unknown blocker",
+  );
+}
+
+function toNumber(value) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function normalizeSourceComponentRefs(data) {
@@ -961,7 +1257,11 @@ function normalizeSourceComponentRefs(data) {
     modelName: item.modelName ?? item.model_name ?? item.model ?? "Unknown model",
     reviewStatus: item.reviewStatus ?? item.review_status ?? null,
     reviewItemId: item.reviewItemId ?? item.review_item_id ?? null,
+    reviewSummary: item.reviewSummary ?? item.review_summary ?? null,
     temporalState: item.temporalState ?? item.temporal_state ?? null,
+    validFrom: item.validFrom ?? item.valid_from ?? null,
+    validTo: item.validTo ?? item.valid_to ?? null,
+    supersededBy: item.supersededBy ?? item.superseded_by ?? null,
   }));
 }
 
@@ -983,6 +1283,10 @@ function normalizeComponentSourceRefs(data) {
     ingestedAt: item.ingestedAt ?? item.ingested_at ?? null,
     processedAt: item.processedAt ?? item.processed_at ?? null,
     extractionContext: item.extractionContext ?? item.extraction_context ?? null,
+    extractorName: item.extractorName ?? item.extractor_name ?? null,
+    extractorKind: item.extractorKind ?? item.extractor_kind ?? null,
+    extractorSchemaVersion:
+      item.extractorSchemaVersion ?? item.extractor_schema_version ?? null,
   }));
 }
 
@@ -1011,7 +1315,11 @@ function buildMockSourceComponentRefs(documentId) {
         modelName: model.name,
         reviewStatus: component.reviewStatus ?? component.review_status ?? null,
         reviewItemId: component.reviewItemId ?? component.review_item_id ?? null,
+        reviewSummary: component.reviewSummary ?? component.review_summary ?? null,
         temporalState: component.temporalState ?? component.temporal_state ?? null,
+        validFrom: component.validFrom ?? component.valid_from ?? null,
+        validTo: component.validTo ?? component.valid_to ?? null,
+        supersededBy: component.supersededBy ?? component.superseded_by ?? null,
       })),
   );
 }

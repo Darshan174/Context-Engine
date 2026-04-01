@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 ReviewStatus = Literal["needs_review", "approved", "rejected", "superseded"]
@@ -26,6 +26,17 @@ class ReviewItemSourceDocumentRead(BaseModel):
     connector_type: str
 
 
+class ReviewDecisionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    previous_status: str | None
+    new_status: str
+    actor_type: str
+    note: str | None
+    created_at: datetime
+
+
 class ReviewItemRead(BaseModel):
     id: UUID
     status: str
@@ -41,6 +52,7 @@ class ReviewItemRead(BaseModel):
     source_documents: list[ReviewItemSourceDocumentRead]
     rationale: str | None
     suggested_action: str | None
+    decision_history: list[ReviewDecisionRead] = []
 
 
 class ComponentSourceRead(BaseModel):
@@ -53,7 +65,11 @@ class ComponentSourceRead(BaseModel):
     created_at_source: datetime | None
     ingested_at: datetime
     processed_at: datetime | None
+    deleted_at: datetime | None
     extraction_context: str | None
+    extractor_name: str | None = None
+    extractor_kind: str | None = None
+    extractor_schema_version: str | None = None
 
 
 class SourceDocumentComponentRead(BaseModel):
@@ -69,4 +85,5 @@ class SourceDocumentComponentRead(BaseModel):
     review_status: str | None
     review_item_id: UUID | None
     review_summary: str | None = None
+    decision_history: list[ReviewDecisionRead] = []
     temporal_state: str | None

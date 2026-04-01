@@ -39,9 +39,20 @@ const backendModel = {
       confidence: 0.95,
       last_verified_at: "2024-01-01T00:00:00Z",
       authority_source: "Stripe",
+      authority_weight: 0.92,
       reviewStatus: "needs_review",
       reviewItemId: "rq1",
       reviewSummary: "Finance still needs to confirm the month-end adjustment.",
+      decisionHistory: [
+        {
+          id: "rqd1",
+          previousStatus: null,
+          newStatus: "needs_review",
+          actorType: "system",
+          note: "Conflict generated automatically during ingestion.",
+          createdAt: "2024-01-01T01:00:00Z",
+        },
+      ],
       sourceDocuments: [
         {
           id: "sd5",
@@ -49,6 +60,8 @@ const backendModel = {
           connectorType: "slack",
           author: "Alice",
           extractionContext: "Extracted from finance thread",
+          extractorName: "Structured extractor",
+          extractorSchemaVersion: "3",
         },
       ],
     },
@@ -126,6 +139,11 @@ describe("ModelDetail", () => {
     );
     expect(screen.getByText("Author: Alice")).toBeInTheDocument();
     expect(screen.getByText("Extracted from finance thread")).toBeInTheDocument();
+    expect(screen.getByText("Extracted by Structured extractor · schema v3")).toBeInTheDocument();
+    expect(screen.getByText("Authority weight 92%")).toBeInTheDocument();
+    expect(screen.getByText("Review history")).toBeInTheDocument();
+    expect(screen.getByText("Marked needs review")).toBeInTheDocument();
+    expect(screen.getByText("Conflict generated automatically during ingestion.")).toBeInTheDocument();
   });
 
   it("loads evidence from the component sources endpoint when inline provenance is absent", () => {
@@ -139,6 +157,8 @@ describe("ModelDetail", () => {
                 connectorType: "notion",
                 author: "CFO",
                 extractionContext: "Extracted from approval note",
+                extractorKind: "llm",
+                extractorSchemaVersion: "2",
               },
             ]
           : [],
@@ -165,6 +185,7 @@ describe("ModelDetail", () => {
     );
     expect(screen.getByText("Author: CFO")).toBeInTheDocument();
     expect(screen.getByText("Extracted from approval note")).toBeInTheDocument();
+    expect(screen.getByText("Extracted by llm · schema v2")).toBeInTheDocument();
   });
 
   it("shows Edit/Delete buttons for backend data", () => {

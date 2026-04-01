@@ -6,6 +6,7 @@ vi.mock("../../api/hooks", () => ({
   useConnectorProcessingSummary: vi.fn(),
   useConnectors: vi.fn(),
   useDashboard: vi.fn(),
+  useEvalSummary: vi.fn(),
   useReviewQueue: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ import {
   useConnectorProcessingSummary,
   useConnectors,
   useDashboard,
+  useEvalSummary,
   useReviewQueue,
 } from "../../api/hooks";
 
@@ -41,6 +43,25 @@ beforeEach(() => {
     isLoading: false,
     isError: false,
     data: [],
+    refetch: vi.fn(),
+  });
+  useEvalSummary.mockReturnValue({
+    isLoading: false,
+    isError: false,
+    isMock: false,
+    data: {
+      passRate: 0.72,
+      passedCases: 18,
+      totalCases: 25,
+      threshold: 0.7,
+      latestRunAt: "2026-04-01T09:30:00Z",
+      domains: [
+        { domain: "pricing", passRate: 0.8, passed: 4, total: 5 },
+        { domain: "meeting", passRate: 0.6, passed: 3, total: 5 },
+      ],
+      blockers: ["Meeting domain still depends on a small gold set."],
+      metrics: [],
+    },
     refetch: vi.fn(),
   });
 });
@@ -118,6 +139,40 @@ describe("Dashboard", () => {
     expect(screen.getByRole("link", { name: /Conflicts/ })).toHaveAttribute("href", "/app/review?kind=conflict");
     expect(screen.getByRole("link", { name: /Historical facts/ })).toHaveAttribute("href", "/app/review?status=superseded");
     expect(screen.getByText(/Review attention is needed/)).toBeInTheDocument();
+  });
+
+  it("renders accuracy status summary and accuracy dashboard link", () => {
+    useDashboard.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        stats: [{ label: "Models", value: 1, delta: "—" }],
+        activity: [],
+        alerts: [],
+      },
+      refetch: vi.fn(),
+    });
+
+    renderDashboard();
+
+    expect(screen.getByText("Accuracy Status")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open accuracy dashboard" })).toHaveAttribute(
+      "href",
+      "/app/accuracy",
+    );
+    expect(screen.getByRole("link", { name: /Pass rate/ })).toHaveAttribute(
+      "href",
+      "/app/accuracy",
+    );
+    expect(screen.getByRole("link", { name: /At-risk domains/ })).toHaveAttribute(
+      "href",
+      "/app/accuracy",
+    );
+    expect(screen.getByRole("link", { name: /Open blockers/ })).toHaveAttribute(
+      "href",
+      "/app/accuracy",
+    );
+    expect(screen.getByText(/Latest eval run/)).toBeInTheDocument();
   });
 
   it("renders pipeline status cards and run-history links", () => {

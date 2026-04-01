@@ -32,13 +32,19 @@ CONNECTOR_STRATEGIES: dict[ConnectorType, ConnectorStrategy] = {
         connector_type=ConnectorType.SLACK,
         provider=ConnectorProvider.NATIVE,
         provider_label="Built in",
-        note="Slack stays native because OAuth, thread expansion, and real-time events are product-critical.",
+        note="Polling via conversations.history. Webhook event handling is planned but not yet active.",
     ),
     ConnectorType.NOTION: ConnectorStrategy(
         connector_type=ConnectorType.NOTION,
         provider=ConnectorProvider.DLT,
         provider_label="dlt",
         note="Planned to use a dlt verified source instead of hand-building the full Notion sync stack.",
+    ),
+    ConnectorType.ZOOM: ConnectorStrategy(
+        connector_type=ConnectorType.ZOOM,
+        provider=ConnectorProvider.OFFICIAL_API,
+        provider_label="Official API",
+        note="Transcript-first meeting source via the Zoom recordings API. Keeps ingestion focused on high-signal meeting transcripts, not media processing.",
     ),
     ConnectorType.GDRIVE: ConnectorStrategy(
         connector_type=ConnectorType.GDRIVE,

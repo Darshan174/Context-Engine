@@ -1,18 +1,15 @@
-"""Ingestion pipeline — processes raw SourceDocuments into knowledge graph facts.
-
-Phase 1 uses a rule-based stub extractor.  A future phase will swap in
-an LLM-backed extractor without changing the service interface.
-"""
+"""Ingestion pipeline — processes raw SourceDocuments into knowledge graph facts."""
 
 from __future__ import annotations
 
-import re
+import hashlib
 from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.knowledge import (
     Component,
     ComponentSource,
@@ -20,8 +17,15 @@ from app.models.knowledge import (
     Relationship,
     RelationshipType,
 )
-from app.models.review import ReviewItem
+from app.models.review import ReviewDecision, ReviewItem
 from app.models.source import ConnectorType, SourceDocument
+from app.processing.embedder import BaseEmbedder, build_default_embedder
+from app.processing.extractor import (
+    BaseExtractor,
+    ExtractedFact,
+    ExtractedRelationship,
+    build_default_extractor,
+)
 
 
 class IngestionServiceError(Exception):
@@ -33,14 +37,29 @@ class IngestionService:
 
     _LOW_CONFIDENCE_THRESHOLD = 0.60
     _HIGH_RISK_CONFIDENCE_THRESHOLD = 0.45
+    _CONNECTOR_AUTHORITY_WEIGHTS: dict[ConnectorType, float] = {
+        ConnectorType.NOTION: 0.95,
+        ConnectorType.ZOOM: 0.90,
+        ConnectorType.GONG: 0.90,
+        ConnectorType.GDRIVE: 0.88,
+        ConnectorType.SLACK: 0.75,
+    }
     _AUTO_MODEL_NAMES: dict[ConnectorType, tuple[str, str]] = {
         ConnectorType.SLACK: ("Slack Insights", "Auto-generated from Slack connector sync"),
         ConnectorType.NOTION: ("Notion Insights", "Auto-generated from Notion connector sync"),
+        ConnectorType.ZOOM: ("Zoom Insights", "Auto-generated from Zoom connector sync"),
     }
     _FALLBACK_MODEL = ("Connector Insights", "Auto-generated from connector sync")
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        extractor: BaseExtractor | None = None,
+        embedder: BaseEmbedder | None = None,
+    ) -> None:
         self.session = session
+        self._extractor: BaseExtractor = extractor or build_default_extractor()
+        self._embedder: BaseEmbedder = embedder or build_default_embedder()
 
     async def process_single_document(
         self,
@@ -110,6 +129,7 @@ class IngestionService:
             .where(
                 SourceDocument.connector_id == connector_id,
                 SourceDocument.processed_at.is_(None),
+                SourceDocument.deleted_at.is_(None),
             )
             .order_by(SourceDocument.ingested_at)
             .execution_options(populate_existing=True)
@@ -144,6 +164,7 @@ class IngestionService:
         value: str,
         confidence: float,
         doc: SourceDocument,
+        authority_weight: float,
     ) -> Component:
         """Create a new component version for a fact."""
         component = Component(
@@ -152,32 +173,108 @@ class IngestionService:
             value=value,
             confidence=confidence,
             authority_source=doc.source_url,
+            authority_weight=authority_weight,
             valid_from=datetime.now(timezone.utc),
+            embedding=await self._embedder.embed_text(f"{name}\n{value}"),
         )
         self.session.add(component)
         await self.session.flush()
         return component
 
-    async def _ensure_source_link(
-        self, component: Component, doc: SourceDocument
+    async def _link_source(
+        self,
+        component: Component,
+        doc: SourceDocument,
+        fact: ExtractedFact,
     ) -> None:
-        """Create a ComponentSource link if it doesn't already exist."""
-        exists = await self.session.scalar(
-            select(ComponentSource.component_id).where(
+        """Create or update a ComponentSource link with fingerprint tracking."""
+        content_hash = hashlib.sha256(
+            f"{fact.name}:{fact.value}".encode()
+        ).hexdigest()
+        ctx = f"Extracted from {doc.connector_type.value} document {doc.external_id}"
+
+        existing = await self.session.scalar(
+            select(ComponentSource).where(
                 ComponentSource.component_id == component.id,
                 ComponentSource.source_document_id == doc.id,
             )
         )
-        if exists is not None:
+        if existing is not None:
+            metadata_changed = any(
+                (
+                    existing.extractor_name != fact.extractor.extractor_name,
+                    existing.extractor_kind != fact.extractor.extractor_kind,
+                    existing.extractor_schema_version != fact.extractor.schema_version,
+                )
+            )
+            if existing.content_hash == content_hash and not metadata_changed:
+                return  # idempotent — same (name, value) pair
+            existing.content_hash = content_hash
+            existing.extracted_value = fact.value
+            existing.extraction_context = ctx
+            existing.extractor_name = fact.extractor.extractor_name
+            existing.extractor_kind = fact.extractor.extractor_kind
+            existing.extractor_schema_version = fact.extractor.schema_version
+            await self.session.flush()
             return
 
         link = ComponentSource(
             component_id=component.id,
             source_document_id=doc.id,
-            extraction_context=f"Extracted from {doc.connector_type.value} "
-            f"document {doc.external_id}",
+            content_hash=content_hash,
+            extracted_value=fact.value,
+            extraction_context=ctx,
+            extractor_name=fact.extractor.extractor_name,
+            extractor_kind=fact.extractor.extractor_kind,
+            extractor_schema_version=fact.extractor.schema_version,
         )
         self.session.add(link)
+        await self.session.flush()
+
+    async def _create_relationship_if_target_exists(
+        self,
+        model: KnowledgeModel,
+        source_component: Component,
+        rel: ExtractedRelationship,
+    ) -> None:
+        """Create a Relationship row if the named target component exists."""
+        try:
+            rel_type = RelationshipType(rel.relationship_type)
+        except ValueError:
+            return
+
+        target = await self.session.scalar(
+            select(Component).where(
+                Component.model_id == model.id,
+                Component.name == rel.target_fact_name,
+                Component.valid_to.is_(None),
+            )
+        )
+        if target is None or target.id == source_component.id:
+            return
+
+        exists = await self.session.scalar(
+            select(Relationship).where(
+                Relationship.source_component_id == source_component.id,
+                Relationship.target_component_id == target.id,
+                Relationship.relationship_type == rel_type,
+                Relationship.valid_to.is_(None),
+            )
+        )
+        if exists is not None:
+            return
+
+        new_rel = Relationship(
+            source_component_id=source_component.id,
+            target_component_id=target.id,
+            relationship_type=rel_type,
+            confidence=rel.confidence,
+            description=(
+                f"Auto-detected: {source_component.name} "
+                f"{rel.relationship_type} {target.name}"
+            ),
+        )
+        self.session.add(new_rel)
         await self.session.flush()
 
     async def _ingest_document(
@@ -186,21 +283,23 @@ class IngestionService:
         doc: SourceDocument,
     ) -> None:
         now = datetime.now(timezone.utc)
-        facts = self._collapse_facts(self._extract_facts(doc))
+        raw_facts = await self._extractor.extract(doc)
+        facts = self._collapse_facts(raw_facts)
         existing_links = await self._load_document_links(doc.id)
         retained_component_ids: set[UUID] = set()
 
-        for name, value, confidence in facts:
+        for fact in facts:
             component = await self._resolve_component_for_fact(
                 model=model,
-                name=name,
-                value=value,
-                confidence=confidence,
+                fact=fact,
                 doc=doc,
                 observed_at=now,
             )
-            await self._ensure_source_link(component, doc)
+            await self._link_source(component, doc, fact)
             retained_component_ids.add(component.id)
+
+            for rel in fact.relationships:
+                await self._create_relationship_if_target_exists(model, component, rel)
 
         for link, component in existing_links:
             if component.id in retained_component_ids:
@@ -216,16 +315,37 @@ class IngestionService:
                 retired_at=now,
             )
 
+    async def retire_source_document(
+        self,
+        document: SourceDocument,
+        *,
+        reason: str,
+        retired_at: datetime | None = None,
+    ) -> int:
+        retired_at = retired_at or datetime.now(timezone.utc)
+        existing_links = await self._load_document_links(document.id)
+        for link, component in existing_links:
+            await self.session.delete(link)
+            await self.session.flush()
+            await self._retire_if_orphaned(
+                component,
+                reason=reason,
+                retired_at=retired_at,
+            )
+        return len(existing_links)
+
     async def _resolve_component_for_fact(
         self,
         *,
         model: KnowledgeModel,
-        name: str,
-        value: str,
-        confidence: float,
+        fact: ExtractedFact,
         doc: SourceDocument,
         observed_at: datetime,
     ) -> Component:
+        name = fact.name
+        value = fact.value
+        confidence = fact.confidence
+        authority_weight = self._source_authority_weight(doc)
         active_components = await self._select_active_components(model.id, name)
         same_value = next(
             (component for component in active_components if component.value == value),
@@ -236,6 +356,14 @@ class IngestionService:
             same_value.last_verified_at = observed_at
             same_value.is_stale = False
             same_value.authority_source = doc.source_url
+            same_value.authority_weight = max(
+                same_value.authority_weight,
+                authority_weight,
+            )
+            if same_value.embedding is None:
+                same_value.embedding = await self._embedder.embed_text(
+                    f"{same_value.name}\n{same_value.value}"
+                )
             await self._sync_active_review_item(
                 same_value,
                 confidence=confidence,
@@ -244,7 +372,74 @@ class IngestionService:
             await self.session.flush()
             return same_value
 
-        component = await self._create_component(model, name, value, confidence, doc)
+        component = await self._create_component(
+            model,
+            name,
+            value,
+            confidence,
+            doc,
+            authority_weight,
+        )
+        strongest_active = max(
+            active_components,
+            key=lambda existing: (
+                existing.authority_weight,
+                existing.confidence,
+                existing.valid_from,
+            ),
+            default=None,
+        )
+        authority_delta = (
+            authority_weight - strongest_active.authority_weight
+            if strongest_active is not None
+            else 0.0
+        )
+        decisive_authority_gap = (
+            strongest_active is not None
+            and abs(authority_delta) >= settings.authority_conflict_auto_resolve_margin
+        )
+        should_activate = (
+            strongest_active is None
+            or authority_delta >= 0
+        )
+
+        if not should_activate and strongest_active is not None:
+            component.valid_to = observed_at
+            component.is_stale = True
+            auto_rejected = decisive_authority_gap and authority_delta < 0
+            await self._upsert_review_item(
+                component,
+                status="rejected" if auto_rejected else "needs_review",
+                severity="medium" if auto_rejected else "high",
+                kind="conflict",
+                title=(
+                    f"{component.name} was rejected by source-authority conflict"
+                    if auto_rejected
+                    else f"{component.name} conflicts with a higher-authority fact"
+                ),
+                summary=(
+                    f'The extracted value "{component.value}" conflicts with the current '
+                    f'authoritative value "{strongest_active.value}".'
+                ),
+                confidence=confidence,
+                rationale=(
+                    f"Incoming source authority {authority_weight:.2f} was lower than the "
+                    f"current active authority {strongest_active.authority_weight:.2f}, "
+                    + (
+                        "so the new fact was automatically rejected."
+                        if auto_rejected
+                        else "so the new fact did not replace current truth."
+                    )
+                ),
+                suggested_action=(
+                    "No action needed unless the lower-authority source should override current truth."
+                    if auto_rejected
+                    else "Review the conflicting source and decide whether to promote or reject it."
+                ),
+            )
+            await self.session.flush()
+            return component
+
         for previous in active_components:
             await self._supersede_component(
                 previous,
@@ -259,7 +454,7 @@ class IngestionService:
         await self._sync_active_review_item(
             component,
             confidence=confidence,
-            conflicting_with=active_components,
+            conflicting_with=[] if decisive_authority_gap else active_components,
         )
         await self.session.flush()
         return component
@@ -287,7 +482,8 @@ class IngestionService:
                 confidence=confidence,
                 rationale=(
                     f"{component.name} replaced an earlier active fact during ingestion. "
-                    "A human should confirm that the newest value is canonical."
+                    "A human should confirm that the newest higher-authority or later fact "
+                    "is canonical."
                 ),
                 suggested_action=(
                     "Confirm whether the latest value should remain active or mark it superseded."
@@ -327,6 +523,7 @@ class IngestionService:
         if item.kind not in {"conflict", "low_confidence"}:
             return
 
+        previous_status = item.status
         item.status = "approved"
         item.summary = f"{component.name} no longer requires review."
         item.rationale = (
@@ -334,6 +531,12 @@ class IngestionService:
         )
         item.suggested_action = "No action needed."
         await self.session.flush()
+        await self._record_decision(
+            item,
+            previous_status=previous_status,
+            new_status="approved",
+            note="Auto-resolved by ingestion pipeline — trust issue no longer applies.",
+        )
 
     async def _supersede_component(
         self,
@@ -473,11 +676,18 @@ class IngestionService:
             )
             self.session.add(item)
             await self.session.flush()
+            await self._record_decision(
+                item,
+                previous_status=None,
+                new_status=status,
+                note=f"Created by ingestion pipeline ({kind}).",
+            )
             return
 
         if item.status not in {"needs_review", "superseded"} and status == "needs_review":
             return
 
+        previous_status = item.status
         item.status = status
         item.severity = severity
         item.kind = kind
@@ -486,6 +696,33 @@ class IngestionService:
         item.confidence = confidence
         item.rationale = rationale
         item.suggested_action = suggested_action
+        await self.session.flush()
+        if previous_status != status:
+            await self._record_decision(
+                item,
+                previous_status=previous_status,
+                new_status=status,
+                note=f"Transition by ingestion pipeline ({kind}).",
+            )
+
+    async def _record_decision(
+        self,
+        item: ReviewItem,
+        *,
+        previous_status: str | None,
+        new_status: str,
+        note: str | None,
+    ) -> None:
+        """Record a ReviewDecision for audit trail."""
+        self.session.add(
+            ReviewDecision(
+                review_item_id=item.id,
+                previous_status=previous_status,
+                new_status=new_status,
+                actor_type="system",
+                note=note,
+            )
+        )
         await self.session.flush()
 
     async def _get_review_item(self, component_id: UUID) -> ReviewItem | None:
@@ -509,6 +746,13 @@ class IngestionService:
         )
         return list(result)
 
+    def _source_authority_weight(self, doc: SourceDocument) -> float:
+        metadata = doc.metadata_json or {}
+        explicit = metadata.get("authority_weight")
+        if isinstance(explicit, (int, float)):
+            return max(0.0, min(float(explicit), 1.0))
+        return self._CONNECTOR_AUTHORITY_WEIGHTS.get(doc.connector_type, 0.5)
+
     async def _load_document_links(
         self,
         document_id: UUID,
@@ -521,70 +765,9 @@ class IngestionService:
         return list(rows.all())
 
     @staticmethod
-    def _collapse_facts(
-        facts: list[tuple[str, str, float]],
-    ) -> list[tuple[str, str, float]]:
-        latest_by_name: dict[str, tuple[str, str, float]] = {}
-        for name, value, confidence in facts:
-            latest_by_name[name] = (name, value, confidence)
+    def _collapse_facts(facts: list[ExtractedFact]) -> list[ExtractedFact]:
+        """Deduplicate by name — last writer wins within the same document."""
+        latest_by_name: dict[str, ExtractedFact] = {}
+        for fact in facts:
+            latest_by_name[fact.name] = fact
         return list(latest_by_name.values())
-
-    # ── Stub extractor ────────────────────────────────────────────
-
-    @staticmethod
-    def _extract_facts(
-        doc: SourceDocument,
-    ) -> list[tuple[str, str, float]]:
-        """Rule-based fact extraction from a SourceDocument.
-
-        Returns a list of (name, value, confidence) tuples.  This is a
-        placeholder that extracts obvious patterns; the LLM extractor
-        will replace it in a later phase.
-        """
-        facts: list[tuple[str, str, float]] = []
-        content = doc.content
-        meta = doc.metadata_json or {}
-        channel = meta.get("channel_name", "unknown")
-
-        # Pattern: "decision: <text>" or "decided: <text>"
-        for m in re.finditer(
-            r"(?:decision|decided)\s*:\s*(.+?)(?:\n|$)", content, re.IGNORECASE
-        ):
-            facts.append((
-                f"Decision in #{channel}",
-                m.group(1).strip(),
-                0.75,
-            ))
-
-        # Pattern: "action item: <text>" or "todo: <text>" or "AI: <text>"
-        for m in re.finditer(
-            r"(?:action item|todo|AI)\s*:\s*(.+?)(?:\n|$)", content, re.IGNORECASE
-        ):
-            facts.append((
-                f"Action Item in #{channel}",
-                m.group(1).strip(),
-                0.70,
-            ))
-
-        # Pattern: "blocker: <text>" or "blocked by: <text>"
-        for m in re.finditer(
-            r"(?:blocker|blocked by)\s*:\s*(.+?)(?:\n|$)", content, re.IGNORECASE
-        ):
-            facts.append((
-                f"Blocker in #{channel}",
-                m.group(1).strip(),
-                0.80,
-            ))
-
-        # Fallback: if no structured facts found, create a channel summary
-        # entry from messages with thread replies (likely important discussions)
-        if not facts and meta.get("reply_count"):
-            author = doc.author or "Unknown"
-            preview = content[:200].replace("\n", " ")
-            facts.append((
-                f"Discussion in #{channel}",
-                f"{author}: {preview}",
-                0.55,
-            ))
-
-        return facts

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
+import Accuracy from "./pages/Accuracy";
 import Models from "./pages/Models";
 import Connectors from "./pages/Connectors";
 import ConnectorRuns from "./pages/ConnectorRuns";
@@ -15,6 +16,7 @@ import WorkspaceSwitcher from "./components/WorkspaceSwitcher";
 
 const ADMIN_NAV = [
   { to: "/app", label: "Dashboard", icon: BarChartIcon },
+  { to: "/app/accuracy", label: "Accuracy", icon: GaugeIcon },
   { to: "/app/models", label: "Models", icon: CubeIcon },
   { to: "/app/query", label: "Query", icon: SearchIcon },
   { to: "/app/review", label: "Review Queue", icon: ShieldCheckIcon },
@@ -132,6 +134,7 @@ function AdminShell() {
           <main className="flex-1 overflow-y-auto p-6 bg-gray-50">
             <Routes>
               <Route index element={<Dashboard />} />
+              <Route path="accuracy" element={<Accuracy />} />
               <Route path="models" element={<Models />} />
               <Route path="query" element={<Query />} />
               <Route path="review" element={<ReviewQueue />} />
@@ -165,6 +168,16 @@ function PlugIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v4m-4-2h8m-6 4v4a2 2 0 002 2h0a2 2 0 002-2V8m-4 6v4m0 0H8m4 0h4" />
+    </svg>
+  );
+}
+
+function GaugeIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.93 19a10 10 0 1114.14 0H4.93z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 13l3-3" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 17h.01" />
     </svg>
   );
 }
