@@ -41,16 +41,16 @@ const ADMIN_NAV = [
 function SidebarContent({ onNavigate }) {
   return (
     <>
-      <div className="flex items-center gap-2 px-5 py-5 border-b border-gray-800">
-        <span className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">
+      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-800/60">
+        <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white font-bold text-[13px] shadow-[0_0_12px_rgba(79,70,229,0.4)]">
           CE
         </span>
-        <span className="font-semibold text-white text-sm tracking-wide">
+        <span className="font-bold text-white text-sm tracking-wide">
           Context Engine
         </span>
       </div>
 
-      <nav className="flex-1 py-4 space-y-1 px-3">
+      <nav className="flex-1 overflow-y-auto py-5 space-y-1 px-4 custom-scrollbar">
         {ADMIN_NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
@@ -58,21 +58,25 @@ function SidebarContent({ onNavigate }) {
             end={to === "/app"}
             onClick={onNavigate}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                isActive
-                  ? "bg-brand-600/20 text-brand-100 font-medium"
-                  : "hover:bg-gray-800 hover:text-white"
+              `group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${isActive
+                ? "bg-brand-600/30 text-white scale-[1.02] shadow-sm shadow-brand-500/10"
+                : "text-slate-400 hover:bg-slate-800/50 hover:text-white"
               }`
             }
           >
-            <Icon className="w-4 h-4 shrink-0" />
-            {label}
+            {({ isActive }) => (
+              <>
+                <Icon className={`w-[18px] h-[18px] shrink-0 transition-transform duration-200 ${isActive ? "scale-110 drop-shadow-sm" : "group-hover:scale-110"}`} />
+                {label}
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
 
-      <div className="px-5 py-4 border-t border-gray-800 text-xs text-gray-500">
-        v0.1.0 &middot; Admin
+      <div className="px-6 py-5 border-t border-slate-800/60 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <span>Admin workspace</span>
+        <span className="flex h-1.5 w-1.5"><span className="animate-ping absolute inline-flex h-1.5 w-1.5 rounded-full bg-brand-400 opacity-75"></span><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-brand-500"></span></span>
       </div>
     </>
   );
@@ -118,35 +122,34 @@ function AdminShell() {
 
         {/* ── Mobile drawer ───────────────────────── */}
         <aside
-          className={`fixed inset-y-0 left-0 z-50 w-60 flex flex-col bg-gray-900 text-gray-300 transform transition-transform duration-200 md:hidden ${
-            mobileNavOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
+          className={`fixed inset-y-0 left-0 z-50 w-64 flex flex-col bg-slate-950 text-slate-300 transform transition-transform duration-300 ease-in-out md:hidden shadow-2xl ${mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+            }`}
         >
           <SidebarContent onNavigate={() => setMobileNavOpen(false)} />
         </aside>
 
         {/* ── Desktop sidebar ─────────────────────── */}
-        <aside className="hidden md:flex md:w-60 flex-col bg-gray-900 text-gray-300">
-          <SidebarContent onNavigate={() => {}} />
+        <aside className="hidden md:flex md:w-64 flex-col bg-slate-950 border-r border-slate-900 shadow-xl z-20">
+          <SidebarContent onNavigate={() => { }} />
         </aside>
 
         {/* ── Main area ───────────────────────────── */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <header className="h-14 border-b border-gray-200 bg-white flex items-center px-4 md:px-6 shrink-0 gap-3">
+        <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
+          <header className="h-16 border-b border-slate-200/60 bg-white/70 backdrop-blur-md flex items-center px-6 shrink-0 gap-4 z-10 supports-[backdrop-filter]:bg-white/60">
             <button
-              className="md:hidden p-1.5 -ml-1 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+              className="md:hidden p-2 -ml-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Open navigation"
             >
               <HamburgerIcon className="w-5 h-5" />
             </button>
-            <h1 className="text-sm font-semibold text-gray-700">{pageTitle}</h1>
-            <div className="ml-auto">
+            <h1 className="text-base font-bold tracking-tight text-slate-800">{pageTitle}</h1>
+            <div className="ml-auto flex items-center gap-3">
               <WorkspaceSwitcher />
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto p-6 bg-gray-50">
+          <main className="flex-1 overflow-y-auto p-6 md:p-8">
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route index element={<Dashboard />} />
@@ -184,14 +187,15 @@ function PageLoader({ fullscreen = false }) {
     <div
       className={
         fullscreen
-          ? "min-h-screen bg-gray-50 flex items-center justify-center px-6"
-          : "min-h-[240px] flex items-center justify-center rounded-xl border border-gray-200 bg-white px-6"
+          ? "min-h-screen bg-slate-50 flex items-center justify-center px-6"
+          : "min-h-[300px] flex items-center justify-center rounded-2xl border border-slate-200/60 bg-white/50 backdrop-blur-sm px-6 shadow-sm"
       }
     >
-      <div className="text-center">
-        <p className="text-sm font-medium text-gray-700">Loading page...</p>
-        <p className="mt-1 text-xs text-gray-500">
-          Pulling the next workflow view into the app shell.
+      <div className="text-center flex flex-col items-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600 mb-4" />
+        <p className="text-sm font-bold text-slate-800 tracking-tight">Loading view...</p>
+        <p className="mt-1.5 text-xs font-medium text-slate-500">
+          Pulling context into the shell
         </p>
       </div>
     </div>

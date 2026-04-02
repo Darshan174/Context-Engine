@@ -46,6 +46,19 @@ beforeEach(() => {
         content:
           "Founder: decision: Launch the pricing page next Tuesday.\nOps: blocker: waiting on legal approval.",
       },
+      {
+        id: "sd13",
+        connectorType: "zoom",
+        meetingTopic: "Board Sync",
+        location: "Board Sync",
+        host: "ceo@example.com",
+        participants: ["CEO", "Board"],
+        recordingDate: "2026-04-01",
+        createdAtSource: "2026-04-01T08:00:00Z",
+        ingestedAt: "2026-04-01T08:05:00Z",
+        processed: false,
+        content: "Reviewed GTM metrics and follow-up owners for the board update.",
+      },
     ],
     isLoading: false,
     isError: false,
@@ -184,6 +197,25 @@ describe("Meetings", () => {
     const listItem = screen.getByRole("button", { name: /weekly product review/i });
     expect(within(listItem).getByText("1 decisions · 1 blockers")).toBeInTheDocument();
     expect(within(listItem).getByText("Zoom transcript")).toBeInTheDocument();
+  });
+
+  it("filters and searches the meeting list", async () => {
+    renderMeetings({ initialEntries: ["/app/meetings"] });
+
+    await userEvent.click(screen.getByRole("button", { name: "Pending extraction" }));
+
+    expect(screen.getByRole("button", { name: /board sync/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /weekly product review/i }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "All transcripts" }));
+    await userEvent.type(screen.getByLabelText("Search meetings"), "founder@example.com");
+
+    expect(
+      screen.getByRole("button", { name: /weekly product review/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /board sync/i })).not.toBeInTheDocument();
   });
 
   it("shows outcome snapshot counts for the selected meeting", () => {

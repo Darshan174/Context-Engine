@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Engineering from "../Engineering";
 
@@ -196,6 +197,29 @@ describe("Engineering", () => {
     });
     expect(within(listItem).getByText("2 refs · 1 decisions")).toBeInTheDocument();
     expect(within(listItem).getByText("pull request review comment")).toBeInTheDocument();
+  });
+
+  it("filters and searches engineering activity", async () => {
+    renderEngineering({ initialEntries: ["/app/engineering"] });
+
+    await userEvent.type(screen.getByLabelText("Search engineering activity"), "octocat");
+
+    expect(
+      screen.getByRole("button", { name: /issue #42: tighten accuracy gating/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /review comment on pull request #77/i }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.clear(screen.getByLabelText("Search engineering activity"));
+    await userEvent.click(screen.getByRole("button", { name: "Refs attached" }));
+
+    expect(
+      screen.getByRole("button", { name: /review comment on pull request #77/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /issue #42: tighten accuracy gating/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows snapshot counts and refs for the selected engineering item", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   useSourceDocument,
@@ -9,9 +9,18 @@ import {
 import MockBadge from "../components/MockBadge";
 import StatusView from "../components/StatusView";
 
+const ENGINEERING_FILTERS = [
+  { key: "all", label: "All activity" },
+  { key: "decisions", label: "Decision signals" },
+  { key: "refs", label: "Refs attached" },
+  { key: "pending", label: "Pending extraction" },
+];
+
 export default function Engineering() {
   const navigate = useNavigate();
   const { documentId } = useParams();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
   const {
     data,
     isLoading,
@@ -23,23 +32,27 @@ export default function Engineering() {
     refetch,
   } = useSourceDocuments({ connector: "github", processed: "all", search: "" });
   const items = data ?? [];
+  const visibleItems = useMemo(
+    () => items.filter((item) => matchesEngineeringFilters(item, { search, filter })),
+    [filter, items, search],
+  );
   const selectedFromList = useMemo(
-    () => items.find((doc) => doc.id === documentId) ?? null,
-    [items, documentId],
+    () => visibleItems.find((doc) => doc.id === documentId) ?? null,
+    [visibleItems, documentId],
   );
   const detailQuery = useSourceDocument(documentId && !selectedFromList ? documentId : null);
 
   useEffect(() => {
-    if (items.length === 0) return;
-    const inList = documentId ? items.some((doc) => doc.id === documentId) : false;
+    if (items.length === 0 || visibleItems.length === 0) return;
+    const inList = documentId ? visibleItems.some((doc) => doc.id === documentId) : false;
     if (!documentId) {
-      navigate(`/app/engineering/${items[0].id}`, { replace: true });
+      navigate(`/app/engineering/${visibleItems[0].id}`, { replace: true });
       return;
     }
-    if (!inList && !detailQuery.isLoading && !detailQuery.data) {
-      navigate(`/app/engineering/${items[0].id}`, { replace: true });
+    if (!inList && !detailQuery.isLoading) {
+      navigate(`/app/engineering/${visibleItems[0].id}`, { replace: true });
     }
-  }, [detailQuery.data, detailQuery.isLoading, documentId, items, navigate]);
+  }, [detailQuery.isLoading, documentId, items.length, navigate, visibleItems]);
 
   const selectedItem = selectedFromList ?? detailQuery.data ?? null;
   const componentsQuery = useSourceDocumentComponents(selectedItem?.id ?? null);
@@ -91,15 +104,46 @@ export default function Engineering() {
             <div>
               <p className="text-sm font-semibold text-gray-700">GitHub activity</p>
               <p className="text-xs text-gray-400">
-                {items.length} loaded engineering item{items.length === 1 ? "" : "s"} from GitHub.
+                {visibleItems.length}
+                {items.length !== visibleItems.length ? ` of ${items.length}` : ""} loaded engineering item
+                {visibleItems.length === 1 ? "" : "s"} from GitHub.
               </p>
             </div>
             <Link to="/app/connectors" className="text-xs font-medium text-brand-700 hover:text-brand-800">
               Manage GitHub
             </Link>
           </div>
+          <div className="border-b border-gray-100 px-4 py-3 space-y-3 bg-gray-50/70">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search repository, title, author, or discussion text..."
+              aria-label="Search engineering activity"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            <div className="flex flex-wrap gap-2">
+              {ENGINEERING_FILTERS.map((item) => {
+                const active = filter === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setFilter(item.key)}
+                    aria-pressed={active}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? "bg-brand-600 text-white"
+                        : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="divide-y divide-gray-100">
-            {items.map((item) => {
+            {visibleItems.length > 0 ? visibleItems.map((item) => {
               const summary = extractEngineeringSummary(item);
               return (
                 <button
@@ -145,7 +189,24 @@ export default function Engineering() {
                   </div>
                 </button>
               );
-            })}
+            }) : (
+              <div className="px-4 py-8 text-center">
+                <p className="text-sm font-semibold text-gray-800">No engineering activity matches this view.</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  Clear the search or switch filters to bring more GitHub context back into scope.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch("");
+                    setFilter("all");
+                  }}
+                  className="mt-4 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
           </div>
           {showLoadMore && (
             <div className="border-t border-gray-100 bg-gray-50 px-4 py-3">
@@ -168,6 +229,10 @@ export default function Engineering() {
               components={componentsQuery.data ?? []}
               reviewItems={reviewQuery.data ?? []}
             />
+          ) : visibleItems.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              No engineering item is selected because the current filters removed every GitHub item from view.
+            </p>
           ) : (
             <p className="text-sm text-gray-500">Select a GitHub item to inspect the code discussion, linked facts, and review pressure.</p>
           )}
@@ -424,6 +489,32 @@ function extractEngineeringSummary(item) {
   const references = (item.pullRequestReferences?.length ?? 0) + (item.commitReferences?.length ?? 0);
   const preview = content.split("\n").slice(0, 3).join(" ") || "No preview available.";
   return { decisions, blockers, references, preview };
+}
+
+function matchesEngineeringFilters(item, { search, filter }) {
+  const summary = extractEngineeringSummary(item);
+  const haystack = [
+    item.repository,
+    item.documentTitle,
+    item.author,
+    item.content,
+    item.parentExternalId,
+    ...(item.pullRequestReferences ?? []),
+    ...(item.commitReferences ?? []),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  const normalizedSearch = search.trim().toLowerCase();
+
+  if (normalizedSearch && !haystack.includes(normalizedSearch)) {
+    return false;
+  }
+
+  if (filter === "decisions") return summary.decisions > 0;
+  if (filter === "refs") return summary.references > 0;
+  if (filter === "pending") return !item.processed;
+  return true;
 }
 
 function categorizeEngineeringComponents(components) {
