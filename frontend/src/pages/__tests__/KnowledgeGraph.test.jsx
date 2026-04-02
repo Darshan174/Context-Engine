@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import KnowledgeGraph from "../KnowledgeGraph";
 
 vi.mock("../../api/hooks", () => ({
@@ -38,6 +39,14 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function renderGraph() {
+  return render(
+    <MemoryRouter>
+      <KnowledgeGraph />
+    </MemoryRouter>,
+  );
+}
+
 describe("KnowledgeGraph", () => {
   it("shows loading state", () => {
     useKnowledgeGraph.mockReturnValue({
@@ -47,7 +56,7 @@ describe("KnowledgeGraph", () => {
       isError: false,
     });
 
-    render(<KnowledgeGraph />);
+    renderGraph();
     expect(screen.getByText("Loading...")).toBeInTheDocument();
   });
 
@@ -59,9 +68,10 @@ describe("KnowledgeGraph", () => {
       isError: false,
     });
 
-    render(<KnowledgeGraph />);
+    renderGraph();
 
     expect(screen.getByText("Knowledge Graph")).toBeInTheDocument();
+    expect(screen.getByText("How to read this graph")).toBeInTheDocument();
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
     expect(screen.getByText(/Showing demo data/)).toBeInTheDocument();
     expect(screen.getByTestId("graph-viz")).toHaveTextContent("3 nodes, 2 edges");
@@ -75,7 +85,7 @@ describe("KnowledgeGraph", () => {
       isError: false,
     });
 
-    render(<KnowledgeGraph />);
+    renderGraph();
 
     expect(screen.getByText("Knowledge Graph")).toBeInTheDocument();
     expect(screen.queryByText(/Demo data/)).not.toBeInTheDocument();
@@ -89,7 +99,7 @@ describe("KnowledgeGraph", () => {
       isError: false,
     });
 
-    render(<KnowledgeGraph />);
+    renderGraph();
 
     await userEvent.type(screen.getByLabelText("Search graph nodes"), "Revenue");
 
@@ -105,12 +115,13 @@ describe("KnowledgeGraph", () => {
       isError: false,
     });
 
-    render(<KnowledgeGraph />);
+    renderGraph();
 
     await userEvent.click(screen.getByText("source"));
 
     // Only Slack #eng is a source
     expect(screen.getByTestId("graph-viz")).toHaveTextContent("1 nodes, 0 edges");
+    expect(screen.getByText(/If the graph still looks empty after syncing sources/i)).toBeInTheDocument();
   });
 
   it("renders edge list", () => {
@@ -121,7 +132,7 @@ describe("KnowledgeGraph", () => {
       isError: false,
     });
 
-    render(<KnowledgeGraph />);
+    renderGraph();
 
     const edges = screen.getAllByTestId("rel-edge");
     expect(edges).toHaveLength(2);
@@ -138,7 +149,7 @@ describe("KnowledgeGraph", () => {
       isError: false,
     });
 
-    render(<KnowledgeGraph />);
+    renderGraph();
 
     expect(screen.getByText(/3\/3 nodes/)).toBeInTheDocument();
     expect(screen.getByText(/2\/2 edges/)).toBeInTheDocument();

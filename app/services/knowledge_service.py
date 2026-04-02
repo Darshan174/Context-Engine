@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.knowledge import Component, ComponentSource, KnowledgeModel, Relationship
+from app.models.knowledge import Component, KnowledgeModel, Relationship
 from app.models.review import ReviewItem
 from app.models.user import Workspace
 from app.processing.embedder import BaseEmbedder, build_default_embedder
@@ -145,16 +145,6 @@ class KnowledgeService:
                 )
             )
             .order_by(Relationship.created_at.desc())
-        )
-        return list(result)
-
-    async def get_component_sources(self, component_id: UUID) -> list[ComponentSource]:
-        """Return ComponentSource rows (with source_document loaded) for a component."""
-        await self._get_component(component_id)  # raises if missing
-        result = await self.session.scalars(
-            select(ComponentSource)
-            .options(selectinload(ComponentSource.source_document))
-            .where(ComponentSource.component_id == component_id)
         )
         return list(result)
 

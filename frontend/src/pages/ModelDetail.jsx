@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import ComponentCard from "../components/ComponentCard";
 import RelationshipsPanel from "../components/RelationshipsPanel";
 import StatusView from "../components/StatusView";
@@ -61,6 +61,28 @@ export default function ModelDetail() {
         )}
       </div>
 
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Trust path for this model</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Use this page to inspect current facts, historical versions, evidence links, and review history before treating a model as operational truth.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+              Sources
+            </Link>
+            <Link to="/app/review" className="font-medium text-brand-700 hover:text-brand-800">
+              Review
+            </Link>
+            <Link to="/app/graph" className="font-medium text-brand-700 hover:text-brand-800">
+              Graph
+            </Link>
+          </div>
+        </div>
+      </div>
+
       {/* ── Add component form ──────────────────── */}
       {isBackendData && showForm && (
         <AddComponentForm modelId={modelId} onClose={() => setShowForm(false)} />
@@ -68,11 +90,21 @@ export default function ModelDetail() {
 
       {/* ── Component grid ──────────────────────── */}
       {components.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-          <p className="text-sm">No components yet.</p>
-          <p className="text-xs mt-1">
-            Components are individual data points — metrics, KPIs, or facts — tracked within this model.
+        <div className="rounded-xl border border-gray-200 bg-white p-6 text-center">
+          <p className="text-sm font-semibold text-gray-800">No components yet.</p>
+          <p className="mt-2 text-xs text-gray-500 max-w-2xl mx-auto">
+            Components are the facts inside this model. In a self-hosted setup, they usually appear after source documents are synced and extracted, or you can add them manually to shape the graph first.
           </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
+            {isBackendData && (
+              <button type="button" onClick={() => setShowForm(true)} className="font-medium text-brand-700 hover:text-brand-800">
+                Add a component
+              </button>
+            )}
+            <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+              Inspect sources
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="space-y-8">

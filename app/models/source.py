@@ -20,6 +20,7 @@ class ConnectorType(str, enum.Enum):
     SLACK = "slack"
     NOTION = "notion"
     ZOOM = "zoom"
+    GITHUB = "github"
     GDRIVE = "gdrive"
     GONG = "gong"
 
@@ -95,6 +96,8 @@ class SourceDocument(UUIDPrimaryKeyMixin, Base):
             metadata.get("location")
             or metadata.get("channel_name")
             or metadata.get("meeting_topic")
+            or metadata.get("title")
+            or metadata.get("repo_full_name")
             or metadata.get("page_title")
             or metadata.get("page_id")
             or self.author

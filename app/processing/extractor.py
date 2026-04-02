@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import settings
+from app.models.source import ConnectorType
 from app.services.llm_service import (
     LLMConfigurationError,
     LLMResponseError,
@@ -57,6 +58,15 @@ _GENERIC_FACT_NAMES = {
     "note",
     "todo",
 }
+_MEETING_OUTCOME_RE = re.compile(
+    r"(?im)^\s*(?:(?P<speaker>[^:\n]{1,80}):\s*)?(?:meeting outcome|outcome)\s*:\s*(?P<text>.+?)\s*$"
+)
+_MEETING_ACTION_OWNER_RE = re.compile(
+    r"(?im)^\s*(?P<speaker>[^:\n]{1,80}):\s*(?:action item|todo|ai)\s*:\s*(?P<text>.+?)\s*$"
+)
+_MEETING_DECISION_RE = re.compile(
+    r"(?im)^\s*(?:(?P<speaker>[^:\n]{1,80}):\s*)?(?:decision|decided)\s*:\s*(?P<text>.+?)\s*$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +141,11 @@ class RegexExtractor(BaseExtractor):
         meta = doc.metadata_json or {}
         source_context = self._source_context_label(meta)
 
+        if doc.connector_type == ConnectorType.GITHUB:
+            facts.extend(self._extract_github_decision_and_rationale(content, source_context))
+        if doc.connector_type == ConnectorType.ZOOM or meta.get("meeting_topic"):
+            facts.extend(self._extract_meeting_outcomes_and_owned_actions(content, source_context))
+
         for m in re.finditer(
             r"(?:decision|decided)\s*:\s*(.+?)(?:\n|$)", content, re.IGNORECASE
         ):
@@ -186,7 +201,7 @@ class RegexExtractor(BaseExtractor):
                 )
             )
 
-        return facts
+        return self._dedupe_facts(facts)
 
     @staticmethod
     def _source_context_label(meta: dict) -> str:
@@ -194,6 +209,10 @@ class RegexExtractor(BaseExtractor):
             return f"#{channel}"
         if meeting_topic := meta.get("meeting_topic"):
             return str(meeting_topic)
+        if title := meta.get("title"):
+            return str(title)
+        if repo_full_name := meta.get("repo_full_name"):
+            return str(repo_full_name)
         if page_title := meta.get("page_title"):
             return str(page_title)
         if location := meta.get("location"):
@@ -218,6 +237,141 @@ class RegexExtractor(BaseExtractor):
                     )
                 )
         return rels
+
+    def _extract_github_decision_and_rationale(
+        self,
+        content: str,
+        source_context: str,
+    ) -> list[ExtractedFact]:
+        facts: list[ExtractedFact] = []
+        decision_name = f"Decision in {source_context}"
+        decision_patterns = (
+            r"(?:^|\n)\s*(?:chosen approach|decision)\s*[:\-]\s*(.+?)(?:\n|$)",
+            r"(?:^|\n)\s*we decided to\s+(.+?)(?:\n|$)",
+        )
+        for pattern in decision_patterns:
+            for match in re.finditer(pattern, content, re.IGNORECASE):
+                value = re.sub(r"\s+", " ", match.group(1)).strip(" .:-")
+                if not value:
+                    continue
+                facts.append(
+                    ExtractedFact(
+                        name=decision_name,
+                        value=value,
+                        confidence=0.78,
+                        fact_type="decision",
+                        extractor=self._metadata,
+                    )
+                )
+
+        rationale_patterns = (
+            r"(?:^|\n)\s*(?:rationale|why)\s*[:\-]\s*(.+?)(?:\n|$)",
+            r"(?:^|\n)\s*because\s+(.+?)(?:\n|$)",
+        )
+        for pattern in rationale_patterns:
+            for match in re.finditer(pattern, content, re.IGNORECASE):
+                value = re.sub(r"\s+", " ", match.group(1)).strip(" .:-")
+                if not value:
+                    continue
+                relationships = (
+                    [
+                        ExtractedRelationship(
+                            target_fact_name=decision_name,
+                            relationship_type="related_to",
+                            confidence=0.65,
+                        )
+                    ]
+                    if any(fact.name == decision_name for fact in facts)
+                    else []
+                )
+                facts.append(
+                    ExtractedFact(
+                        name=f"Discussion in {source_context}",
+                        value=f"Rationale: {value}",
+                        confidence=0.68,
+                        fact_type="discussion",
+                        relationships=relationships,
+                        extractor=self._metadata,
+                    )
+                )
+
+        return facts
+
+    def _extract_meeting_outcomes_and_owned_actions(
+        self,
+        content: str,
+        source_context: str,
+    ) -> list[ExtractedFact]:
+        facts: list[ExtractedFact] = []
+        for outcome in extract_meeting_outcomes(content):
+            facts.append(
+                ExtractedFact(
+                    name=f"Decision in {source_context}",
+                    value=outcome,
+                    confidence=0.77,
+                    fact_type="decision",
+                    extractor=self._metadata,
+                )
+            )
+        for owner, action in extract_meeting_action_items(content):
+            owner_prefix = f"Owner: {owner} - " if owner else ""
+            facts.append(
+                ExtractedFact(
+                    name=f"Action Item in {source_context}",
+                    value=f"{owner_prefix}{action}",
+                    confidence=0.72,
+                    fact_type="action_item",
+                    extractor=self._metadata,
+                )
+            )
+        return facts
+
+    @staticmethod
+    def _dedupe_facts(facts: list[ExtractedFact]) -> list[ExtractedFact]:
+        deduped: list[ExtractedFact] = []
+        seen: set[tuple[str, str, str]] = set()
+        for fact in facts:
+            normalized_value = re.sub(r"\s+", " ", fact.value).strip(" .:-").lower()
+            if fact.fact_type == "action_item":
+                normalized_value = re.sub(
+                    r"^owner\s*:\s*[^-–—]+[\-–—]\s*",
+                    "",
+                    normalized_value,
+                )
+            key = (fact.name.lower(), normalized_value, fact.fact_type)
+            if key in seen:
+                continue
+            deduped.append(fact)
+            seen.add(key)
+        return deduped
+
+
+def extract_meeting_outcomes(content: str) -> list[str]:
+    outcomes: list[str] = []
+    seen: set[str] = set()
+    for pattern in (_MEETING_OUTCOME_RE, _MEETING_DECISION_RE):
+        for match in pattern.finditer(content):
+            text = re.sub(r"\s+", " ", match.group("text")).strip(" .:-")
+            key = text.lower()
+            if not text or key in seen:
+                continue
+            outcomes.append(text)
+            seen.add(key)
+    return outcomes
+
+
+def extract_meeting_action_items(content: str) -> list[tuple[str | None, str]]:
+    items: list[tuple[str | None, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in _MEETING_ACTION_OWNER_RE.finditer(content):
+        owner = re.sub(r"\s+", " ", (match.group("speaker") or "")).strip(" .:-") or None
+        text = re.sub(r"\s+", " ", match.group("text")).strip(" .:-")
+        key = ((owner or "").lower(), text.lower())
+        if not text or key in seen:
+            continue
+        items.append((owner, text))
+        seen.add(key)
+    return items
 
 
 class LiteLLMStructuredClient:

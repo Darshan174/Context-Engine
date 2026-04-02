@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     zoom_api_base_url: str = "https://api.zoom.us/v2"
     zoom_oauth_base_url: str = "https://zoom.us"
     zoom_oauth_scopes: str = "recording:read:user"
+    github_api_base_url: str = "https://api.github.com"
     oauth_state_ttl_seconds: int = 600
     celery_task_time_limit: int = 600  # 10 min hard kill per task
     eval_admin_token: str | None = None

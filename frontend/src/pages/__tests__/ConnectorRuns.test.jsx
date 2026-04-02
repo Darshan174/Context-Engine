@@ -124,6 +124,7 @@ describe("ConnectorRuns", () => {
     renderRuns();
 
     expect(screen.getByText("Slack Run History")).toBeInTheDocument();
+    expect(screen.getByText("How this page gets populated")).toBeInTheDocument();
     expect(screen.getByText("Latest job")).toBeInTheDocument();
     expect(
       screen.getByText("Slack sync completed: fetched 18, stored 12, processed 11 (incremental)."),
@@ -157,5 +158,30 @@ describe("ConnectorRuns", () => {
 
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
     expect(screen.getByText(/Live run history is unavailable in demo mode/)).toBeInTheDocument();
+  });
+
+  it("shows guidance when a live connector has no jobs yet", () => {
+    useConnectors.mockReturnValue({
+      data: [
+        {
+          type: "slack",
+          connectorId: "conn_1",
+          name: "Slack",
+          description: "Channels",
+          status: "connected",
+          lastSync: "Never",
+          itemsSynced: 0,
+        },
+      ],
+      isMock: false,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    renderRuns();
+
+    expect(screen.getByText("No sync or reprocess jobs have been recorded for this connector yet.")).toBeInTheDocument();
+    expect(screen.getByText(/Queue the first connector sync/i)).toBeInTheDocument();
   });
 });

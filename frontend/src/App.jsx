@@ -1,21 +1,34 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
-import Landing from "./pages/Landing";
-import Dashboard from "./pages/Dashboard";
-import Accuracy from "./pages/Accuracy";
-import Models from "./pages/Models";
-import Connectors from "./pages/Connectors";
-import ConnectorRuns from "./pages/ConnectorRuns";
-import KnowledgeGraph from "./pages/KnowledgeGraph";
-import ModelDetail from "./pages/ModelDetail";
-import Query from "./pages/Query";
-import ReviewQueue from "./pages/ReviewQueue";
-import Sources from "./pages/Sources";
 import WorkspaceBootstrap from "./components/WorkspaceBootstrap";
 import WorkspaceSwitcher from "./components/WorkspaceSwitcher";
 
+const Landing = lazy(() => import("./pages/Landing"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const FounderBrief = lazy(() => import("./pages/FounderBrief"));
+const DecisionRegister = lazy(() => import("./pages/DecisionRegister"));
+const Changes = lazy(() => import("./pages/Changes"));
+const LaunchGuard = lazy(() => import("./pages/LaunchGuard"));
+const Meetings = lazy(() => import("./pages/Meetings"));
+const Engineering = lazy(() => import("./pages/Engineering"));
+const Accuracy = lazy(() => import("./pages/Accuracy"));
+const Models = lazy(() => import("./pages/Models"));
+const Connectors = lazy(() => import("./pages/Connectors"));
+const ConnectorRuns = lazy(() => import("./pages/ConnectorRuns"));
+const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
+const ModelDetail = lazy(() => import("./pages/ModelDetail"));
+const Query = lazy(() => import("./pages/Query"));
+const ReviewQueue = lazy(() => import("./pages/ReviewQueue"));
+const Sources = lazy(() => import("./pages/Sources"));
+
 const ADMIN_NAV = [
   { to: "/app", label: "Dashboard", icon: BarChartIcon },
+  { to: "/app/brief", label: "Founder Brief", icon: BriefIcon },
+  { to: "/app/decisions", label: "Decision Register", icon: DecisionIcon },
+  { to: "/app/changes", label: "What Changed", icon: ChangesIcon },
+  { to: "/app/launch-guard", label: "Launch Guard", icon: GuardIcon },
+  { to: "/app/meetings", label: "Meetings", icon: MeetingIcon },
+  { to: "/app/engineering", label: "Engineering", icon: CodeIcon },
   { to: "/app/accuracy", label: "Accuracy", icon: GaugeIcon },
   { to: "/app/models", label: "Models", icon: CubeIcon },
   { to: "/app/query", label: "Query", icon: SearchIcon },
@@ -67,11 +80,13 @@ function SidebarContent({ onNavigate }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Landing />} />
-      <Route path="/app/*" element={<AdminShell />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<PageLoader fullscreen />}>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/app/*" element={<AdminShell />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 
@@ -132,25 +147,54 @@ function AdminShell() {
           </header>
 
           <main className="flex-1 overflow-y-auto p-6 bg-gray-50">
-            <Routes>
-              <Route index element={<Dashboard />} />
-              <Route path="accuracy" element={<Accuracy />} />
-              <Route path="models" element={<Models />} />
-              <Route path="query" element={<Query />} />
-              <Route path="review" element={<ReviewQueue />} />
-              <Route path="review/:itemId" element={<ReviewQueue />} />
-              <Route path="connectors" element={<Connectors />} />
-              <Route path="connectors/:connectorType/runs" element={<ConnectorRuns />} />
-              <Route path="sources" element={<Sources />} />
-              <Route path="sources/:documentId" element={<Sources />} />
-              <Route path="graph" element={<KnowledgeGraph />} />
-              <Route path="model/:modelId" element={<ModelDetail />} />
-              <Route path="*" element={<Navigate to="/app" replace />} />
-            </Routes>
+            <Suspense fallback={<PageLoader />}>
+              <Routes>
+                <Route index element={<Dashboard />} />
+                <Route path="brief" element={<FounderBrief />} />
+                <Route path="decisions" element={<DecisionRegister />} />
+                <Route path="changes" element={<Changes />} />
+                <Route path="launch-guard" element={<LaunchGuard />} />
+                <Route path="meetings" element={<Meetings />} />
+                <Route path="meetings/:documentId" element={<Meetings />} />
+                <Route path="engineering" element={<Engineering />} />
+                <Route path="engineering/:documentId" element={<Engineering />} />
+                <Route path="accuracy" element={<Accuracy />} />
+                <Route path="models" element={<Models />} />
+                <Route path="query" element={<Query />} />
+                <Route path="review" element={<ReviewQueue />} />
+                <Route path="review/:itemId" element={<ReviewQueue />} />
+                <Route path="connectors" element={<Connectors />} />
+                <Route path="connectors/:connectorType/runs" element={<ConnectorRuns />} />
+                <Route path="sources" element={<Sources />} />
+                <Route path="sources/:documentId" element={<Sources />} />
+                <Route path="graph" element={<KnowledgeGraph />} />
+                <Route path="model/:modelId" element={<ModelDetail />} />
+                <Route path="*" element={<Navigate to="/app" replace />} />
+              </Routes>
+            </Suspense>
           </main>
         </div>
       </div>
     </WorkspaceBootstrap>
+  );
+}
+
+function PageLoader({ fullscreen = false }) {
+  return (
+    <div
+      className={
+        fullscreen
+          ? "min-h-screen bg-gray-50 flex items-center justify-center px-6"
+          : "min-h-[240px] flex items-center justify-center rounded-xl border border-gray-200 bg-white px-6"
+      }
+    >
+      <div className="text-center">
+        <p className="text-sm font-medium text-gray-700">Loading page...</p>
+        <p className="mt-1 text-xs text-gray-500">
+          Pulling the next workflow view into the app shell.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -178,6 +222,14 @@ function GaugeIcon({ className }) {
       <path strokeLinecap="round" strokeLinejoin="round" d="M4.93 19a10 10 0 1114.14 0H4.93z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 13l3-3" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 17h.01" />
+    </svg>
+  );
+}
+
+function CodeIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l-4 3 4 3M16 9l4 3-4 3M14 5l-4 14" />
     </svg>
   );
 }
@@ -233,6 +285,51 @@ function DocumentStackIcon({ className }) {
       <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8M8 11h8M8 15h5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 3h9a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 21h9a2 2 0 002-2V8" />
+    </svg>
+  );
+}
+
+function BriefIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 6h10M8 10h10M8 14h6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" />
+    </svg>
+  );
+}
+
+function DecisionIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" />
+    </svg>
+  );
+}
+
+function ChangesIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8M8 12h8M8 17h5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h.01M4 12h.01M4 17h.01" />
+    </svg>
+  );
+}
+
+function GuardIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6" />
+    </svg>
+  );
+}
+
+function MeetingIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <rect x="4" y="6" width="12" height="10" rx="2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16 10l4-2v6l-4-2" />
     </svg>
   );
 }

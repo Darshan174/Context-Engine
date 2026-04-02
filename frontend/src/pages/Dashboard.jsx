@@ -40,6 +40,10 @@ export default function Dashboard() {
   const processingByType = new Map(
     (processingQuery.data?.items ?? []).map((item) => [item.connectorType, item]),
   );
+  const processedDocuments = Array.from(processingByType.values()).reduce(
+    (total, item) => total + Number(item.processedDocuments ?? 0),
+    0,
+  );
   const connectorErrors = connectors.filter((connector) => connector.status === "error").length;
   const queuedConnectors = connectors.filter((connector) => connector.syncQueuedAt).length;
   const pendingExtraction = Array.from(processingByType.values()).reduce(
@@ -60,6 +64,32 @@ export default function Dashboard() {
     accuracyPassRate != null &&
     accuracyThreshold != null &&
     accuracyPassRate >= accuracyThreshold;
+  const connectedConnectors = connectors.filter((connector) => connector.status === "connected").length;
+  const sourceCount = stats.find((stat) => stat.label === "Sources")?.value ?? 0;
+  const setupChecklist = [
+    {
+      title: "Connect a source",
+      description: "Start with Slack, Notion, or Zoom so the workspace has real company context to ingest.",
+      complete: connectedConnectors > 0,
+      to: "/app/connectors",
+      action: connectedConnectors > 0 ? "Manage connectors" : "Open connectors",
+    },
+    {
+      title: "Run the first sync",
+      description: "Pull raw documents into the source store before extraction, review, and querying can happen.",
+      complete: sourceCount > 0,
+      to: sourceCount > 0 ? "/app/sources" : "/app/connectors",
+      action: sourceCount > 0 ? "Inspect sources" : "Sync a connector",
+    },
+    {
+      title: "Validate extracted context",
+      description: "Check processed facts, review conflicts, and benchmark the current trust path before relying on answers.",
+      complete: processedDocuments > 0,
+      to: processedDocuments > 0 ? "/app/review" : "/app/sources",
+      action: processedDocuments > 0 ? "Open review queue" : "Inspect sources",
+    },
+  ];
+  const setupComplete = setupChecklist.every((step) => step.complete);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -108,6 +138,40 @@ export default function Dashboard() {
           </Link>
         </div>
       )}
+
+      <div
+        className={`rounded-xl border p-5 ${
+          setupComplete ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-white"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Self-host setup checklist</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Keep the first-run path simple: connect a source, sync it, then verify what the system extracted.
+            </p>
+          </div>
+          {setupComplete ? (
+            <Link to="/app/query" className="text-xs font-medium text-emerald-800 hover:text-emerald-900">
+              Start querying
+            </Link>
+          ) : (
+            <Link to="/app/connectors" className="text-xs font-medium text-brand-700 hover:text-brand-800">
+              Continue setup
+            </Link>
+          )}
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {setupChecklist.map((step, index) => (
+            <SetupStep key={step.title} index={index + 1} step={step} />
+          ))}
+        </div>
+        <p className={`mt-4 text-xs ${setupComplete ? "text-emerald-700" : "text-gray-500"}`}>
+          {setupComplete
+            ? "This workspace has completed the first-run path. Use Query, Review, and Accuracy to keep trust tight as new source data arrives."
+            : "This checklist is designed for self-hosted installs: you should be able to reach a source-backed query flow without extra product setup."}
+        </p>
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-start justify-between gap-4">
@@ -305,6 +369,49 @@ function TrustCard({ label, value, tone, to }) {
       <p className="text-[11px] uppercase tracking-wide opacity-80">{label}</p>
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </Link>
+  );
+}
+
+function SetupStep({ index, step }) {
+  return (
+    <div
+      className={`rounded-xl border px-4 py-4 ${
+        step.complete ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${
+                step.complete ? "bg-emerald-200 text-emerald-800" : "bg-white text-gray-600 border border-gray-200"
+              }`}
+            >
+              {index}
+            </span>
+            <p className="text-sm font-semibold text-gray-800">{step.title}</p>
+          </div>
+          <p className="mt-2 text-xs text-gray-600">{step.description}</p>
+        </div>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+            step.complete ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+          }`}
+        >
+          {step.complete ? "Done" : "Next"}
+        </span>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-3 text-xs">
+        <Link to={step.to} className="font-medium text-brand-700 hover:text-brand-800">
+          {step.action}
+        </Link>
+        {step.actionTo && step.actionTo !== step.to && (
+          <Link to={step.actionTo} className="font-medium text-brand-700 hover:text-brand-800">
+            Inspect results
+          </Link>
+        )}
+      </div>
+    </div>
   );
 }
 

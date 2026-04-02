@@ -20,9 +20,12 @@ from app.models.job import SyncJob, SyncJobStatus
 from app.models.knowledge import Component, ComponentSource, KnowledgeModel
 from app.models.review import ReviewDecision, ReviewItem
 from app.models.source import ConnectorType, SourceDocument
+from app.models.user import Workspace
 from app.utils.crypto import encrypt_token
 
 from cryptography.fernet import Fernet
+
+from app.main import app
 
 _TEST_FERNET_KEY = Fernet.generate_key().decode()
 
@@ -71,6 +74,15 @@ def _make_component(model, *, name="decision:launch date", value="2026-04-15"):
 
 
 class TestReprocessDocument:
+    def test_route_registered_once(self):
+        routes = [
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/api/source-documents/{document_id}/reprocess"
+            and "POST" in getattr(route, "methods", set())
+        ]
+        assert len(routes) == 1
+
     def _setup(self, monkeypatch):
         monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
 
@@ -187,6 +199,15 @@ class TestReprocessDocument:
 
 
 class TestComponentSources:
+    def test_route_registered_once(self):
+        routes = [
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/api/components/{component_id}/sources"
+            and "GET" in getattr(route, "methods", set())
+        ]
+        assert len(routes) == 1
+
     async def test_returns_source_documents_for_component(
         self, client, workspace, db_session
     ):
@@ -223,19 +244,24 @@ class TestComponentSources:
 
         comp_id = comp.id
 
-        resp = await client.get(f"/api/components/{comp_id}/sources")
+        resp = await client.get(
+            f"/api/components/{comp_id}/sources",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
         sources = resp.json()
         assert len(sources) == 2
 
-        source_doc_ids = {s["source_document_id"] for s in sources}
+        source_doc_ids = {s["id"] for s in sources}
         assert str(doc1.id) in source_doc_ids
         assert str(doc2.id) in source_doc_ids
 
-        doc1_source = next(s for s in sources if s["source_document_id"] == str(doc1.id))
+        doc1_source = next(s for s in sources if s["id"] == str(doc1.id))
         assert doc1_source["connector_type"] == "slack"
         assert doc1_source["extraction_context"] == "decision context from doc1"
         assert doc1_source["author"] == "user@example.com"
+        assert doc1_source["source_url"] == "https://slack.com/archives/C123/p1234"
+        assert doc1_source["processed_at"] is None
 
     async def test_returns_empty_list_when_no_sources(
         self, client, workspace, db_session
@@ -249,12 +275,49 @@ class TestComponentSources:
         await db_session.flush()
         comp_id = comp.id
 
-        resp = await client.get(f"/api/components/{comp_id}/sources")
+        resp = await client.get(
+            f"/api/components/{comp_id}/sources",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
         assert resp.json() == []
 
     async def test_missing_component_returns_404(self, client, workspace, db_session):
-        resp = await client.get(f"/api/components/{uuid4()}/sources")
+        resp = await client.get(
+            f"/api/components/{uuid4()}/sources",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 404
+
+    async def test_wrong_workspace_returns_404(self, client, workspace, db_session):
+        conn = _make_slack_connector(workspace)
+        db_session.add(conn)
+        await db_session.flush()
+
+        doc = _make_source_doc(conn)
+        db_session.add(doc)
+        await db_session.flush()
+
+        model = _make_knowledge_model(workspace)
+        db_session.add(model)
+        await db_session.flush()
+
+        comp = _make_component(model)
+        db_session.add(comp)
+        await db_session.flush()
+
+        db_session.add(
+            ComponentSource(component_id=comp.id, source_document_id=doc.id)
+        )
+        await db_session.flush()
+        other_workspace = Workspace(id=uuid4(), name="Other Workspace")
+        db_session.add(other_workspace)
+        await db_session.flush()
+
+        resp = await client.get(
+            f"/api/components/{comp.id}/sources",
+            params={"workspace_id": str(other_workspace.id)},
+        )
         assert resp.status_code == 404
 
 
@@ -262,6 +325,15 @@ class TestComponentSources:
 
 
 class TestDocumentComponents:
+    def test_route_registered_once(self):
+        routes = [
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/api/source-documents/{document_id}/components"
+            and "GET" in getattr(route, "methods", set())
+        ]
+        assert len(routes) == 1
+
     def _setup(self, monkeypatch):
         monkeypatch.setattr(connector_module.settings, "encryption_key", _TEST_FERNET_KEY)
 
@@ -304,6 +376,8 @@ class TestDocumentComponents:
         names = {c["name"] for c in components}
         assert "decision:launch" in names
         assert "blocker:legal" in names
+        assert "created_at" not in components[0]
+        assert "source_documents" not in components[0]
 
     async def test_document_components_include_review_history(
         self, client, workspace, db_session, monkeypatch

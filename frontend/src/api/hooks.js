@@ -81,6 +81,16 @@ const CONNECTOR_CATALOG = {
     providerLabel: "Official API",
     providerNote: "Transcript-first Zoom ingestion keeps the connector focused on high-signal meeting context instead of media processing.",
   },
+  github: {
+    type: "github",
+    name: "GitHub",
+    description: "Issues, pull requests, reviews, and engineering discussion",
+    color: "#24292F",
+    availability: "available",
+    provider: "official_api",
+    providerLabel: "Official API",
+    providerNote: "GitHub stays close to the official API because PRs, review comments, and issue links carry the engineering rationale startups actually need.",
+  },
   gdrive: {
     type: "gdrive",
     name: "Google Drive",
@@ -282,7 +292,7 @@ export function useConnectorSyncStatus(connectorId, { enabled = true } = {}) {
         const data = await api.get(`/connectors/${connectorId}/sync-status`);
         return normalizeSyncJob(data);
       } catch (err) {
-        if (err.status && ![404, 501].includes(err.status)) {
+        if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         return null;
@@ -306,7 +316,7 @@ export function useConnectorSyncJobs(connectorId, { enabled = true } = {}) {
         const data = await api.get(`/connectors/${connectorId}/sync-jobs`);
         return Array.isArray(data) ? data.map(normalizeSyncJob) : [];
       } catch (err) {
-        if (err.status && ![404, 501].includes(err.status)) {
+        if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         return [];
@@ -406,7 +416,7 @@ export function useSourceDocument(documentId) {
         const data = await api.get(`/source-documents/${documentId}?workspace_id=${wsId}`);
         return normalizeSourceDocuments([data])[0] ?? null;
       } catch (err) {
-        if (err.status && err.status !== 501) {
+        if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         const fallback = normalizeSourceDocuments(mockSourceDocuments).find((doc) => doc.id === documentId);
@@ -428,7 +438,7 @@ export function useSourceDocumentComponents(documentId) {
         const data = await api.get(`/source-documents/${documentId}/components?workspace_id=${wsId}`);
         return normalizeSourceComponentRefs(data);
       } catch (err) {
-        if (err.status && ![404, 501].includes(err.status)) {
+        if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         return buildMockSourceComponentRefs(documentId);
@@ -442,13 +452,14 @@ export function useComponentSources(componentId, { enabled = true } = {}) {
     queryKey: ["component-sources", componentId],
     enabled: enabled && !!componentId,
     queryFn: async () => {
-      if (!componentId) return [];
+      const wsId = await getWorkspaceId();
+      if (!componentId || !wsId) return [];
 
       try {
-        const data = await api.get(`/components/${componentId}/sources`);
+        const data = await api.get(`/components/${componentId}/sources?workspace_id=${wsId}`);
         return normalizeComponentSourceRefs(data);
       } catch (err) {
-        if (err.status && ![404, 501].includes(err.status)) {
+        if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         return buildMockComponentSources(componentId);
@@ -473,7 +484,7 @@ export function useSourceDocumentReviewItems(documentId) {
         const data = await api.get(`/review-items?${params.toString()}`);
         return normalizeReviewItems(data);
       } catch (err) {
-        if (err.status && ![404, 501].includes(err.status)) {
+        if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         return buildMockSourceReviewItems(documentId);
@@ -555,7 +566,7 @@ export function useEvalSummary() {
         const data = await api.get(`/evals/summary?workspace_id=${wsId}`);
         return { summary: normalizeEvalSummary(data), isMock: false };
       } catch (err) {
-        if (err.status && ![400, 404, 422, 501].includes(err.status)) {
+        if (err.status && ![400, 404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         return { summary: normalizeEvalSummary(mockEvalSummary), isMock: true };
@@ -583,7 +594,7 @@ export function useEvalCases(domain, { enabled = true } = {}) {
         const data = await api.get(`/evals/cases?${params.toString()}`);
         return { payload: normalizeEvalCases(data), isMock: false };
       } catch (err) {
-        if (err.status && ![400, 404, 422, 501].includes(err.status)) {
+        if (err.status && ![400, 404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
         return {
@@ -599,6 +610,229 @@ export function useEvalCases(domain, { enabled = true } = {}) {
     data: query.data?.payload ?? null,
     isMock: query.data?.isMock ?? false,
   };
+}
+
+// ── Workflow views ───────────────────────────────────────────
+
+export function useFounderBrief(lookbackDays = 7) {
+  const query = useQuery({
+    queryKey: ["founder-brief", lookbackDays],
+    queryFn: async () => {
+      const wsId = await getWorkspaceId();
+      if (!wsId) return { brief: null, isMock: false };
+
+      const params = new URLSearchParams({
+        workspace_id: wsId,
+        lookback_days: String(lookbackDays),
+      });
+
+      try {
+        const data = await api.get(`/founder-brief?${params.toString()}`);
+        return { brief: normalizeFounderBrief(data), isMock: false };
+      } catch (err) {
+        if (err.status && ![404, 500, 501, 502, 503].includes(err.status)) {
+          throw err;
+        }
+        return { brief: buildMockFounderBrief(), isMock: true };
+      }
+    },
+  });
+
+  return {
+    ...query,
+    data: query.data?.brief ?? null,
+    isMock: query.data?.isMock ?? false,
+  };
+}
+
+export function useTimeline(limit = 50) {
+  const query = useQuery({
+    queryKey: ["timeline", limit],
+    queryFn: async () => {
+      const wsId = await getWorkspaceId();
+      if (!wsId) {
+        return {
+          timeline: { workspaceId: null, generatedAt: null, totalEvents: 0, items: [] },
+          isMock: false,
+        };
+      }
+
+      const params = new URLSearchParams({
+        workspace_id: wsId,
+        limit: String(limit),
+      });
+
+      try {
+        const data = await api.get(`/timeline?${params.toString()}`);
+        return { timeline: normalizeTimelinePayload(data), isMock: false };
+      } catch (err) {
+        if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
+          throw err;
+        }
+        return { timeline: buildMockTimeline(limit), isMock: true };
+      }
+    },
+  });
+
+  return {
+    ...query,
+    data: query.data?.timeline ?? { workspaceId: null, generatedAt: null, totalEvents: 0, items: [] },
+    isMock: query.data?.isMock ?? false,
+  };
+}
+
+export function useDecisionRegister() {
+  const query = useQuery({
+    queryKey: ["decision-register"],
+    queryFn: async () => {
+      const wsId = await getWorkspaceId();
+      if (!wsId) return { items: [], isMock: false };
+
+      try {
+        const params = new URLSearchParams({
+          workspace_id: wsId,
+          include_historical: "true",
+          limit: "100",
+        });
+        const data = await api.get(`/decisions?${params.toString()}`);
+        return { items: normalizeDecisionRegisterItems(data), isMock: false };
+      } catch (err) {
+        if (err.status && ![404, 500, 501, 502, 503].includes(err.status)) {
+          throw err;
+        }
+        const documents = normalizeSourceDocuments(mockSourceDocuments).filter(
+          isDecisionLikeDocument,
+        );
+        return {
+          items: buildDecisionRegisterItems(
+            documents,
+            Object.fromEntries(documents.map((doc) => [doc.id, buildMockSourceComponentRefs(doc.id)])),
+          ),
+          isMock: true,
+        };
+      }
+    },
+  });
+
+  return {
+    ...query,
+    data: query.data?.items ?? [],
+    isMock: query.data?.isMock ?? false,
+  };
+}
+
+export function useDecisionHistory(componentId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ["decision-history", componentId],
+    enabled: enabled && !!componentId,
+    queryFn: async () => {
+      const wsId = await getWorkspaceId();
+      if (!wsId || !componentId) return null;
+
+      try {
+        const data = await api.get(
+          `/decisions/${componentId}/history?workspace_id=${wsId}`,
+        );
+        return normalizeDecisionHistoryPayload(data);
+      } catch (err) {
+        if (err.status && ![404, 500, 501, 502, 503].includes(err.status)) {
+          throw err;
+        }
+        return null;
+      }
+    },
+  });
+}
+
+export function useLaunchGuardContext() {
+  const query = useQuery({
+    queryKey: ["launch-guard-context"],
+    queryFn: async () => {
+      const wsId = await getWorkspaceId();
+      if (!wsId) return { payload: emptyLaunchGuardContext(), isMock: false };
+
+      try {
+        const [models, reviewData, sourceData] = await Promise.all([
+          api.get(`/models?workspace_id=${wsId}`),
+          api.get(`/review-items?workspace_id=${wsId}`),
+          api.get(`/source-documents?workspace_id=${wsId}&processed=true&limit=100`),
+        ]);
+
+        const modelDetails = await Promise.all(
+          (models ?? []).map((model) => api.get(`/models/${model.id}`)),
+        );
+        const components = modelDetails.flatMap((detail) =>
+          normalizeLaunchGuardComponents(detail),
+        );
+        const documents = normalizeSourceDocuments(sourceData.items ?? []);
+        const decisionDocuments = documents.filter(isDecisionLikeDocument);
+        const componentEntries = await Promise.all(
+          decisionDocuments.map(async (doc) => {
+            try {
+              const linked = await api.get(
+                `/source-documents/${doc.id}/components?workspace_id=${wsId}`,
+              );
+              return [doc.id, normalizeSourceComponentRefs(linked)];
+            } catch (err) {
+              if (err.status && ![404, 500, 501, 502, 503].includes(err.status)) {
+                throw err;
+              }
+              return [doc.id, buildMockSourceComponentRefs(doc.id)];
+            }
+          }),
+        );
+
+        let evalSummary = null;
+        try {
+          const evalData = await api.get(`/evals/summary?workspace_id=${wsId}`);
+          evalSummary = normalizeEvalSummary(evalData);
+        } catch (err) {
+          if (err.status && ![400, 404, 422, 500, 501, 502, 503].includes(err.status)) {
+            throw err;
+          }
+        }
+
+        return {
+          payload: {
+            components,
+            reviewItems: normalizeReviewItems(reviewData),
+            decisions: buildDecisionRegisterItems(
+              decisionDocuments,
+              Object.fromEntries(componentEntries),
+            ),
+            evalSummary,
+          },
+          isMock: false,
+        };
+      } catch (err) {
+        if (err.status && ![400, 404, 422, 500, 501, 502, 503].includes(err.status)) {
+          throw err;
+        }
+        return {
+          payload: buildMockLaunchGuardContext(),
+          isMock: true,
+        };
+      }
+    },
+  });
+
+  return {
+    ...query,
+    data: query.data?.payload ?? emptyLaunchGuardContext(),
+    isMock: query.data?.isMock ?? false,
+  };
+}
+
+export function useLaunchGuardCheck() {
+  return useMutation({
+    mutationFn: async (draft) => {
+      const wsId = await getWorkspaceId();
+      return api.post("/launch-guard/check", {
+        workspace_id: wsId,
+        draft,
+      });
+    },
+  });
 }
 
 // ── Knowledge Graph ────────────────────────────────────────────
@@ -853,6 +1087,26 @@ export function useConnectZoom() {
   });
 }
 
+export function useConnectGitHub() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ token, repositories }) => {
+      const wsId = await getWorkspaceId();
+      return api.post("/connectors/github/connect", {
+        workspace_id: wsId,
+        token,
+        repositories,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["connectors"] });
+      qc.invalidateQueries({ queryKey: ["connector-processing-summary"] });
+      qc.invalidateQueries({ queryKey: ["source-documents"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
 function normalizeConnectors(data) {
   if (!Array.isArray(data)) return [];
 
@@ -923,6 +1177,7 @@ function normalizeConnectors(data) {
       totalProcessedCount: Number(record.config?.total_processed_count ?? 0),
       authMode: record.config?.auth_mode ?? null,
       accountId: record.config?.account_id ?? null,
+      repositories: Array.isArray(record.config?.repositories) ? record.config.repositories : [],
       ingestionMode: record.config?.ingestion_mode ?? null,
       sourceFocus: record.config?.source_focus ?? null,
       lastWebhookEvent: record.config?.last_zoom_webhook_event ?? null,
@@ -994,6 +1249,21 @@ function normalizeSourceDocuments(data) {
         item.transcript_timestamp ??
         null,
       sourceType: metadata.source_type ?? item.sourceType ?? item.source_type ?? null,
+      repository: metadata.repo_full_name ?? item.repository ?? item.repo_full_name ?? null,
+      documentTitle: metadata.title ?? item.documentTitle ?? item.title ?? null,
+      githubItemType: metadata.item_type ?? item.githubItemType ?? item.item_type ?? null,
+      parentExternalId:
+        metadata.parent_external_id ?? item.parentExternalId ?? item.parent_external_id ?? null,
+      pullRequestReferences:
+        metadata.pull_request_references ??
+        item.pullRequestReferences ??
+        item.pull_request_references ??
+        [],
+      commitReferences:
+        metadata.commit_references ??
+        item.commitReferences ??
+        item.commit_references ??
+        [],
       metadata,
     };
   });
@@ -1255,13 +1525,506 @@ function normalizeSourceComponentRefs(data) {
     confidence: typeof item.confidence === "number" ? item.confidence : null,
     modelId: item.modelId ?? item.model_id ?? null,
     modelName: item.modelName ?? item.model_name ?? item.model ?? "Unknown model",
+    authorityWeight: toNumber(item.authorityWeight ?? item.authority_weight ?? null),
     reviewStatus: item.reviewStatus ?? item.review_status ?? null,
     reviewItemId: item.reviewItemId ?? item.review_item_id ?? null,
     reviewSummary: item.reviewSummary ?? item.review_summary ?? null,
+    decisionHistory: normalizeReviewDecisionHistory(
+      item.decisionHistory ?? item.decision_history ?? [],
+    ),
     temporalState: item.temporalState ?? item.temporal_state ?? null,
     validFrom: item.validFrom ?? item.valid_from ?? null,
     validTo: item.validTo ?? item.valid_to ?? null,
     supersededBy: item.supersededBy ?? item.superseded_by ?? null,
+    sourceDocuments: normalizeComponentSourceRefs(item.sourceDocuments ?? item.source_documents ?? []),
+  }));
+}
+
+function normalizeDecisionRegisterItems(data) {
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .map((item) => {
+      const rationaleSources = normalizeDecisionRationaleSources(
+        item.rationaleSources ?? item.rationale_sources ?? [],
+      );
+      const primarySource = rationaleSources[0] ?? null;
+      return {
+        id: item.id,
+        title: extractDecisionTitleFromFact(item.name, item.value),
+        summary:
+          rationaleSources[0]?.extractedValue ??
+          rationaleSources[0]?.extractionContext ??
+          item.value ??
+          "No source summary available yet.",
+        status: normalizeDecisionStatus(item),
+        sourceDocumentId: primarySource?.sourceDocumentId ?? null,
+        sourceUrl: primarySource?.sourceUrl ?? null,
+        connectorType: primarySource?.connectorType ?? null,
+        sourceLabel: primarySource?.label ?? item.model_name ?? item.modelName ?? "Decision source",
+        author: primarySource?.author ?? null,
+        createdAt: item.validFrom ?? item.valid_from ?? null,
+        updatedAt: item.validFrom ?? item.valid_from ?? null,
+        meetingTopic: null,
+        relatedBlocker: item.reviewSummary ?? item.review_summary ?? null,
+        modelNames: [item.modelName ?? item.model_name ?? "Unknown model"].filter(Boolean),
+        reviewItemIds: [item.reviewItemId ?? item.review_item_id].filter(Boolean),
+        averageConfidence: toNumber(item.confidence),
+        affectedComponents: [
+          normalizeSourceComponentRefs([
+            {
+              ...item,
+              model_id: item.modelId ?? item.model_id,
+              model_name: item.modelName ?? item.model_name,
+              authority_weight: item.authorityWeight ?? item.authority_weight,
+              review_status: item.reviewStatus ?? item.review_status,
+              review_item_id: item.reviewItemId ?? item.review_item_id,
+              review_summary: item.reviewSummary ?? item.review_summary,
+              temporal_state: item.temporalState ?? item.temporal_state,
+              valid_from: item.validFrom ?? item.valid_from,
+              valid_to: item.validTo ?? item.valid_to,
+              superseded_by: item.supersededBy ?? item.superseded_by,
+              decision_history: item.decisionHistory ?? item.decision_history,
+              source_documents: rationaleSources,
+            },
+          ])[0],
+        ].filter(Boolean),
+        decisionHistory: normalizeReviewDecisionHistory(
+          item.decisionHistory ?? item.decision_history ?? [],
+        ),
+        rationaleSources,
+        historyAvailable: true,
+      };
+    })
+    .sort((a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0));
+}
+
+function normalizeDecisionHistoryPayload(data) {
+  if (!data || typeof data !== "object") return null;
+  return {
+    workspaceId: data.workspaceId ?? data.workspace_id ?? null,
+    decisionName: data.decisionName ?? data.decision_name ?? "Decision history",
+    currentDecisionId: data.currentDecisionId ?? data.current_decision_id ?? null,
+    entries: normalizeDecisionRegisterItems(data.entries ?? []),
+  };
+}
+
+function normalizeDecisionRationaleSources(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item, index) => ({
+    id: item.sourceDocumentId ?? item.source_document_id ?? `decision-source-${index + 1}`,
+    sourceDocumentId: item.sourceDocumentId ?? item.source_document_id ?? null,
+    label: item.label ?? `Source ${index + 1}`,
+    connectorType: item.connectorType ?? item.connector_type ?? null,
+    sourceUrl: item.sourceUrl ?? item.source_url ?? null,
+    author: item.author ?? null,
+    createdAtSource: item.createdAtSource ?? item.created_at_source ?? null,
+    extractionContext: item.extractionContext ?? item.extraction_context ?? null,
+    extractedValue: item.extractedValue ?? item.extracted_value ?? null,
+    extractorName: item.extractorName ?? item.extractor_name ?? null,
+    extractorKind: item.extractorKind ?? item.extractor_kind ?? null,
+    extractorSchemaVersion:
+      item.extractorSchemaVersion ?? item.extractor_schema_version ?? null,
+  }));
+}
+
+function normalizeDecisionStatus(item) {
+  const explicit = normalizeValue(
+    item.reviewStatus ?? item.review_status ?? item.temporalState ?? item.temporal_state,
+  );
+  if (explicit === "needs_review") return "needs_review";
+  if (explicit === "historical" || explicit === "superseded") return "historical";
+  if ((item.validTo ?? item.valid_to) != null) return "historical";
+  return "current";
+}
+
+function extractDecisionTitleFromFact(name, value) {
+  const cleanedName = String(name ?? "").replace(/^decision:\s*/i, "").trim();
+  const cleanedValue = trimSentence(value ?? "");
+  if (cleanedValue) return cleanedValue;
+  return cleanedName || "Untitled decision";
+}
+
+function normalizeFounderBrief(data) {
+  if (!data || typeof data !== "object") return null;
+
+  return {
+    workspaceId: data.workspaceId ?? data.workspace_id ?? null,
+    generatedAt: data.generatedAt ?? data.generated_at ?? null,
+    lookbackDays: toNumber(data.lookbackDays ?? data.lookback_days ?? null),
+    changedFacts: normalizeFounderBriefFacts(data.changedFacts ?? data.changed_facts ?? []),
+    newBlockers: normalizeFounderBriefFacts(data.newBlockers ?? data.new_blockers ?? []),
+    openConflicts: normalizeFounderBriefConflicts(data.openConflicts ?? data.open_conflicts ?? []),
+    staleHighRiskItems: normalizeFounderBriefRisks(
+      data.staleHighRiskItems ?? data.stale_high_risk_items ?? [],
+    ),
+    recentConnectorFailures: normalizeFounderBriefFailures(
+      data.recentConnectorFailures ?? data.recent_connector_failures ?? [],
+    ),
+  };
+}
+
+function normalizeFounderBriefFacts(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => ({
+    componentId: item.componentId ?? item.component_id ?? null,
+    modelId: item.modelId ?? item.model_id ?? null,
+    modelName: item.modelName ?? item.model_name ?? "Unknown model",
+    name: item.name ?? "Unnamed fact",
+    value: item.value ?? "",
+    confidence: toNumber(item.confidence ?? null),
+    authorityWeight: toNumber(item.authorityWeight ?? item.authority_weight ?? null),
+    validFrom: item.validFrom ?? item.valid_from ?? null,
+    reviewStatus: item.reviewStatus ?? item.review_status ?? null,
+    reviewItemId: item.reviewItemId ?? item.review_item_id ?? null,
+    sourceLabels: item.sourceLabels ?? item.source_labels ?? [],
+  }));
+}
+
+function normalizeFounderBriefConflicts(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => ({
+    id: item.reviewItemId ?? item.review_item_id ?? item.id ?? null,
+    reviewItemId: item.reviewItemId ?? item.review_item_id ?? item.id ?? null,
+    componentId: item.componentId ?? item.component_id ?? null,
+    componentName: item.componentName ?? item.component_name ?? "Unknown fact",
+    status: item.status ?? "needs_review",
+    severity: item.severity ?? "medium",
+    kind: item.kind ?? "conflict",
+    title: item.title ?? "Untitled conflict",
+    summary: item.summary ?? "",
+    suggestedAction: item.suggestedAction ?? item.suggested_action ?? null,
+    createdAt: item.createdAt ?? item.created_at ?? null,
+    updatedAt: item.updatedAt ?? item.updated_at ?? null,
+  }));
+}
+
+function normalizeFounderBriefRisks(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => ({
+    componentId: item.componentId ?? item.component_id ?? null,
+    name: item.name ?? "Unnamed fact",
+    value: item.value ?? "",
+    reason: item.reason ?? "",
+    confidence: toNumber(item.confidence ?? null),
+    reviewStatus: item.reviewStatus ?? item.review_status ?? null,
+    sourceLabels: item.sourceLabels ?? item.source_labels ?? [],
+  }));
+}
+
+function normalizeFounderBriefFailures(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => ({
+    jobId: item.jobId ?? item.job_id ?? null,
+    connectorId: item.connectorId ?? item.connector_id ?? null,
+    connectorType: item.connectorType ?? item.connector_type ?? "unknown",
+    jobType: item.jobType ?? item.job_type ?? "sync",
+    failedAt: item.failedAt ?? item.failed_at ?? null,
+    errorType: item.errorType ?? item.error_type ?? null,
+    errorMessage: item.errorMessage ?? item.error_message ?? null,
+  }));
+}
+
+function normalizeTimelinePayload(data) {
+  if (!data || typeof data !== "object") {
+    return { workspaceId: null, generatedAt: null, totalEvents: 0, items: [] };
+  }
+
+  const items = Array.isArray(data.items)
+    ? data.items.map((item, index) => normalizeTimelineItem(item, index))
+    : [];
+
+  return {
+    workspaceId: data.workspaceId ?? data.workspace_id ?? null,
+    generatedAt: data.generatedAt ?? data.generated_at ?? null,
+    totalEvents: toNumber(data.totalEvents ?? data.total_events ?? items.length),
+    items,
+  };
+}
+
+function normalizeTimelineItem(item, index) {
+  const type = normalizeTimelineType(item.eventType ?? item.event_type ?? item.type ?? null);
+  const occurredAt = item.occurredAt ?? item.occurred_at ?? item.timestamp ?? null;
+  const reviewItemId = item.reviewItemId ?? item.review_item_id ?? null;
+  const sourceDocumentId = item.sourceDocumentId ?? item.source_document_id ?? null;
+  const connectorType = item.connectorType ?? item.connector_type ?? null;
+  const componentId = item.componentId ?? item.component_id ?? null;
+
+  return {
+    id:
+      item.id ??
+      `${type}-${reviewItemId ?? sourceDocumentId ?? componentId ?? connectorType ?? index}-${occurredAt ?? "event"}`,
+    type,
+    occurredAt,
+    title: item.title ?? "Untitled event",
+    summary: item.summary ?? "",
+    status: item.status ?? null,
+    componentId,
+    reviewItemId,
+    sourceDocumentId,
+    connectorId: item.connectorId ?? item.connector_id ?? null,
+    connectorType,
+    sourceLabel: item.sourceLabel ?? item.source_label ?? null,
+    modelName: item.modelName ?? item.model_name ?? null,
+  };
+}
+
+function normalizeTimelineType(value) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (normalized === "decision_change" || normalized === "decision") return "decision";
+  if (normalized === "review_transition" || normalized === "review") return "review";
+  if (normalized === "source_ingest" || normalized === "source") return "source";
+  if (normalized === "connector_failure" || normalized === "connector") return "connector";
+  return "other";
+}
+
+function buildMockFounderBrief() {
+  const context = buildMockLaunchGuardContext();
+  const connectors = normalizeConnectors(mockConnectors);
+  const processingItems = buildMockProcessingSummary(mockSourceDocuments);
+  const processingMap = new Map(
+    processingItems.map((item) => [item.connectorType ?? item.type, item]),
+  );
+
+  return {
+    workspaceId: "mock-workspace",
+    generatedAt: new Date().toISOString(),
+    lookbackDays: 7,
+    changedFacts: context.components.slice(0, 4).map((item) => ({
+      componentId: item.id,
+      modelId: item.modelId,
+      modelName: item.modelName,
+      name: item.name,
+      value: item.value,
+      confidence: item.confidence,
+      authorityWeight: item.authorityWeight,
+      validFrom: item.validFrom,
+      reviewStatus: item.reviewStatus,
+      reviewItemId: item.reviewItemId,
+      sourceLabels: (item.sourceDocuments ?? []).map((doc) => doc.label),
+    })),
+    newBlockers: context.components
+      .filter((item) => String(item.name).toLowerCase().startsWith("blocker"))
+      .slice(0, 4)
+      .map((item) => ({
+        componentId: item.id,
+        modelId: item.modelId,
+        modelName: item.modelName,
+        name: item.name,
+        value: item.value,
+        confidence: item.confidence,
+        authorityWeight: item.authorityWeight,
+        validFrom: item.validFrom,
+        reviewStatus: item.reviewStatus,
+        reviewItemId: item.reviewItemId,
+        sourceLabels: (item.sourceDocuments ?? []).map((doc) => doc.label),
+      })),
+    openConflicts: normalizeReviewItems(mockReviewQueue)
+      .filter((item) => item.kind === "conflict" || item.status === "needs_review")
+      .slice(0, 5)
+      .map((item) => ({
+        id: item.id,
+        reviewItemId: item.id,
+        componentId: null,
+        componentName: item.model ?? "Unknown fact",
+        status: item.status,
+        severity: item.severity,
+        kind: item.kind,
+        title: item.title,
+        summary: item.summary,
+        suggestedAction: item.suggestedAction,
+        createdAt: item.lastSeenAt,
+        updatedAt: item.lastSeenAt,
+      })),
+    staleHighRiskItems: context.components
+      .filter(
+        (item) =>
+          item.reviewStatus === "needs_review" ||
+          item.temporalState === "historical" ||
+          item.temporalState === "superseded",
+      )
+      .slice(0, 5)
+      .map((item) => ({
+        componentId: item.id,
+        name: item.name,
+        value: item.value,
+        reason: item.reviewSummary ?? "Current fact still needs review.",
+        confidence: item.confidence,
+        reviewStatus: item.reviewStatus,
+        sourceLabels: (item.sourceDocuments ?? []).map((doc) => doc.label),
+      })),
+    recentConnectorFailures: connectors
+      .filter((item) => item.status === "error")
+      .slice(0, 5)
+      .map((item) => ({
+        jobId: item.connectorId ?? item.type,
+        connectorId: item.connectorId ?? item.type,
+        connectorType: item.type,
+        jobType: "sync",
+        failedAt: new Date().toISOString(),
+        errorType: "ConnectorError",
+        errorMessage:
+          item.message ??
+          `${item.name} still has pipeline issues${processingMap.get(item.type)?.unprocessedDocuments ? " and pending documents." : "."}`,
+      })),
+  };
+}
+
+function buildMockTimeline(limit = 50) {
+  const documents = normalizeSourceDocuments(mockSourceDocuments);
+  const decisionDocuments = documents.filter(isDecisionLikeDocument);
+  const componentsByDocument = Object.fromEntries(
+    decisionDocuments.map((doc) => [doc.id, buildMockSourceComponentRefs(doc.id)]),
+  );
+  const decisions = buildDecisionRegisterItems(decisionDocuments, componentsByDocument);
+  const reviewItems = normalizeReviewItems(mockReviewQueue);
+  const connectors = normalizeConnectors(mockConnectors);
+  const processingItems = buildMockProcessingSummary(mockSourceDocuments);
+  const processingMap = new Map(
+    processingItems.map((item) => [item.connectorType ?? item.type, item]),
+  );
+
+  const reviewEvents = reviewItems.flatMap((item) => {
+    const history = item.decisionHistory ?? [];
+    if (history.length === 0) {
+      return [
+        {
+          id: `review-${item.id}`,
+          type: "review",
+          occurredAt: item.lastSeenAt ?? null,
+          title: item.title,
+          summary: item.summary,
+          status: item.status,
+          reviewItemId: item.id,
+          modelName: item.model ?? null,
+        },
+      ];
+    }
+    return history.map((event) => ({
+      id: `review-${item.id}-${event.id ?? event.createdAt ?? event.newStatus}`,
+      type: "review",
+      occurredAt: event.createdAt ?? item.lastSeenAt ?? null,
+      title: item.title,
+      summary: `${formatTimelineTransition(event.previousStatus, event.newStatus)}${event.note ? ` — ${event.note}` : ""}`,
+      status: event.newStatus ?? item.status,
+      reviewItemId: item.id,
+      componentId: item.componentId ?? null,
+      modelName: item.model ?? null,
+    }));
+  });
+
+  const decisionEvents = decisions.map((item) => ({
+    id: `decision-${item.id}`,
+    type: "decision",
+    occurredAt: item.createdAt ?? item.updatedAt ?? null,
+    title: item.title,
+    summary: item.summary,
+    status: item.status,
+    componentId: item.id,
+    sourceDocumentId: item.sourceDocumentId ?? null,
+    sourceLabel: item.sources?.[0]?.label ?? null,
+    modelName: item.modelName ?? null,
+  }));
+
+  const sourceEvents = documents.slice(0, 12).map((item) => ({
+    id: `source-${item.id}`,
+    type: "source",
+    occurredAt: item.ingestedAt ?? item.createdAtSource ?? null,
+    title: formatMockTimelineSourceTitle(item),
+    summary: item.processed
+      ? "Stored and processed into structured context."
+      : "Stored in the source layer and still waiting on extraction.",
+    status: item.processed ? "processed" : "pending",
+    sourceDocumentId: item.id,
+    connectorId: item.connectorId ?? null,
+    connectorType: item.connectorType ?? null,
+    sourceLabel: item.label ?? null,
+  }));
+
+  const connectorEvents = connectors
+    .map((connector) => {
+      const processing = processingMap.get(connector.type) ?? null;
+      const hasRisk =
+        connector.status === "error" ||
+        connector.status === "warning" ||
+        connector.status === "disconnected" ||
+        (processing?.unprocessedDocuments ?? 0) > 0;
+      if (!hasRisk) return null;
+      return {
+        id: `connector-${connector.connectorId ?? connector.type}`,
+        type: "connector",
+        occurredAt: connector.lastWebhookReceivedAt ?? connector.syncQueuedAt ?? null,
+        title: `${connector.name} connector`,
+        summary:
+          connector.status === "error"
+            ? "Connector health needs attention before new context can be trusted."
+            : (processing?.unprocessedDocuments ?? 0) > 0
+              ? `${processing.unprocessedDocuments} documents still waiting on extraction.`
+              : connector.syncMessage ?? "Connector needs attention.",
+        status: connector.status,
+        connectorId: connector.connectorId ?? null,
+        connectorType: connector.type ?? null,
+      };
+    })
+    .filter(Boolean);
+
+  const items = [...reviewEvents, ...decisionEvents, ...sourceEvents, ...connectorEvents]
+    .sort((a, b) => new Date(b.occurredAt ?? 0) - new Date(a.occurredAt ?? 0))
+    .slice(0, limit);
+
+  return {
+    workspaceId: "mock-workspace",
+    generatedAt: new Date().toISOString(),
+    totalEvents: items.length,
+    items,
+  };
+}
+
+function formatTimelineTransition(previousStatus, nextStatus) {
+  if (!previousStatus && nextStatus) return `Moved to ${formatTimelineLabel(nextStatus)}`;
+  if (previousStatus && nextStatus) {
+    return `${formatTimelineLabel(previousStatus)} -> ${formatTimelineLabel(nextStatus)}`;
+  }
+  return "Review state updated";
+}
+
+function formatTimelineLabel(value) {
+  if (!value) return "Unknown";
+  return String(value).replace(/_/g, " ");
+}
+
+function formatMockTimelineSourceTitle(item) {
+  if (item.meetingTopic) return `${item.meetingTopic} transcript ingested`;
+  if (item.repository && item.documentTitle) return `${item.repository}: ${item.documentTitle}`;
+  if (item.location) return `${item.location} source ingested`;
+  return `${String(item.connectorType ?? "source").toUpperCase()} source ingested`;
+}
+
+function normalizeLaunchGuardComponents(detail) {
+  const modelId = detail?.id ?? null;
+  const modelName = detail?.name ?? "Unknown model";
+  const components = Array.isArray(detail?.components) ? detail.components : [];
+
+  return components.map((item) => ({
+    id: item.id,
+    name: item.name ?? "Unnamed component",
+    value: item.value ?? "",
+    confidence: typeof item.confidence === "number" ? item.confidence : null,
+    modelId,
+    modelName,
+    reviewStatus: item.reviewStatus ?? item.review_status ?? null,
+    reviewSummary: item.reviewSummary ?? item.review_summary ?? null,
+    reviewItemId: item.reviewItemId ?? item.review_item_id ?? null,
+    temporalState: item.temporalState ?? item.temporal_state ?? null,
+    validFrom: item.validFrom ?? item.valid_from ?? null,
+    validTo: item.validTo ?? item.valid_to ?? null,
+    authorityWeight: toNumber(item.authorityWeight ?? item.authority_weight ?? null),
+    decisionHistory: normalizeReviewDecisionHistory(
+      item.decisionHistory ?? item.decision_history ?? [],
+    ),
+    sourceDocuments: normalizeComponentSourceRefs(
+      item.sourceDocuments ?? item.source_documents ?? [],
+    ),
   }));
 }
 
@@ -1313,15 +2076,162 @@ function buildMockSourceComponentRefs(documentId) {
         confidence: typeof component.confidence === "number" ? component.confidence : null,
         modelId,
         modelName: model.name,
+        authorityWeight: toNumber(component.authorityWeight ?? component.authority_weight ?? null),
         reviewStatus: component.reviewStatus ?? component.review_status ?? null,
         reviewItemId: component.reviewItemId ?? component.review_item_id ?? null,
         reviewSummary: component.reviewSummary ?? component.review_summary ?? null,
+        decisionHistory: normalizeReviewDecisionHistory(
+          component.decisionHistory ?? component.decision_history ?? [],
+        ),
         temporalState: component.temporalState ?? component.temporal_state ?? null,
         validFrom: component.validFrom ?? component.valid_from ?? null,
         validTo: component.validTo ?? component.valid_to ?? null,
         supersededBy: component.supersededBy ?? component.superseded_by ?? null,
+        sourceDocuments: normalizeComponentSourceRefs(
+          component.sourceDocuments ?? component.source_documents ?? [],
+        ),
       })),
   );
+}
+
+function buildDecisionRegisterItems(documents, componentsByDocument) {
+  return documents
+    .map((doc) => {
+      const linkedComponents = (componentsByDocument[doc.id] ?? []).filter(Boolean);
+      const status = deriveDecisionStatus(linkedComponents);
+      const reviewItemIds = uniqueValues(
+        linkedComponents.map((component) => component.reviewItemId).filter(Boolean),
+      );
+      const modelNames = uniqueValues(
+        linkedComponents.map((component) => component.modelName).filter(Boolean),
+      );
+      const blocker = extractBlockerReference(doc, linkedComponents);
+      const latestValidFrom = linkedComponents
+        .map((component) => component.validFrom)
+        .filter(Boolean)
+        .sort()
+        .at(-1);
+      const latestDecisionHistory = linkedComponents
+        .flatMap((component) => component.decisionHistory ?? [])
+        .sort((a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0));
+      const averageConfidence =
+        linkedComponents.length > 0
+          ? linkedComponents.reduce(
+              (sum, component) => sum + (component.confidence ?? 0),
+              0,
+            ) / linkedComponents.length
+          : null;
+
+      return {
+        id: doc.id,
+        title: extractDecisionTitle(doc),
+        summary: extractDecisionSummary(doc),
+        status,
+        sourceDocumentId: doc.id,
+        sourceUrl: doc.sourceUrl ?? null,
+        connectorType: doc.connectorType,
+        sourceLabel: doc.location ?? doc.meetingTopic ?? doc.externalId ?? "Source document",
+        author: doc.author ?? "Unknown",
+        createdAt: doc.createdAtSource ?? doc.ingestedAt ?? null,
+        updatedAt: latestValidFrom ?? doc.ingestedAt ?? null,
+        meetingTopic: doc.meetingTopic ?? null,
+        relatedBlocker: blocker,
+        modelNames,
+        reviewItemIds,
+        averageConfidence,
+        affectedComponents: linkedComponents,
+        decisionHistory: latestDecisionHistory,
+      };
+    })
+    .sort((a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0));
+}
+
+function isDecisionLikeDocument(doc) {
+  const haystack = [doc.content, doc.location, doc.meetingTopic]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
+  return [
+    "decision:",
+    "key decisions",
+    "decided to",
+    "we decided",
+    "approved",
+    "adopt ",
+    "adopted",
+    "selected",
+    "choose ",
+    "chose ",
+    "launch the",
+  ].some((token) => haystack.includes(token));
+}
+
+function deriveDecisionStatus(components) {
+  if (!components.length) return "current";
+
+  const reviewStates = components
+    .map((component) => normalizeValue(component.reviewStatus))
+    .filter(Boolean);
+  const temporalStates = components
+    .map((component) => normalizeValue(component.temporalState))
+    .filter(Boolean);
+
+  if (reviewStates.includes("needs_review")) return "needs_review";
+  if (
+    (temporalStates.length > 0 &&
+      temporalStates.every((state) => state === "historical" || state === "superseded")) ||
+    (reviewStates.length > 0 && reviewStates.every((state) => state === "superseded"))
+  ) {
+    return "historical";
+  }
+  return "current";
+}
+
+function extractDecisionTitle(doc) {
+  const content = doc.content ?? "";
+  const explicitDecision = content.match(/decision:\s*([^\n]+)/i)?.[1];
+  if (explicitDecision) return trimSentence(explicitDecision);
+
+  const keyDecisionLine = content
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => /^[-*]\s+/.test(line));
+  if (keyDecisionLine) return trimSentence(keyDecisionLine.replace(/^[-*]\s+/, ""));
+
+  const naturalDecision = content.match(/\b(?:we decided|decided to|choose|chose|approved)\b[^.\n]*/i)?.[0];
+  if (naturalDecision) return trimSentence(naturalDecision);
+
+  return doc.meetingTopic ?? doc.location ?? "Untitled decision";
+}
+
+function extractDecisionSummary(doc) {
+  const content = (doc.content ?? "").replace(/\s+/g, " ").trim();
+  if (!content) return "No source summary available yet.";
+  return content.length > 180 ? `${content.slice(0, 177)}...` : content;
+}
+
+function extractBlockerReference(doc, components) {
+  const explicitBlocker = (doc.content ?? "").match(/blocker:\s*([^\n]+)/i)?.[1];
+  if (explicitBlocker) return trimSentence(explicitBlocker);
+
+  const componentBlocker = components.find((component) =>
+    [component.name, component.value].filter(Boolean).join(" ").toLowerCase().includes("blocker"),
+  );
+  if (!componentBlocker) return null;
+  return trimSentence(componentBlocker.value || componentBlocker.name);
+}
+
+function trimSentence(value) {
+  return value.replace(/\s+/g, " ").trim().replace(/[.]+$/, "");
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values));
+}
+
+function normalizeValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
 }
 
 function buildMockComponentSources(componentId) {
@@ -1338,6 +2248,34 @@ function buildMockSourceReviewItems(documentId) {
   return normalizeReviewItems(mockReviewQueue).filter((item) =>
     (item.sourceDocuments ?? []).some((doc) => doc?.id === documentId),
   );
+}
+
+function buildMockLaunchGuardContext() {
+  const details = Object.entries(modelFixtures).map(([modelId, model]) => ({
+    id: modelId,
+    name: model.name,
+    components: model.components ?? [],
+  }));
+  const documents = normalizeSourceDocuments(mockSourceDocuments);
+  const decisionDocuments = documents.filter(isDecisionLikeDocument);
+  return {
+    components: details.flatMap((detail) => normalizeLaunchGuardComponents(detail)),
+    reviewItems: normalizeReviewItems(mockReviewQueue),
+    decisions: buildDecisionRegisterItems(
+      decisionDocuments,
+      Object.fromEntries(decisionDocuments.map((doc) => [doc.id, buildMockSourceComponentRefs(doc.id)])),
+    ),
+    evalSummary: normalizeEvalSummary(mockEvalSummary),
+  };
+}
+
+function emptyLaunchGuardContext() {
+  return {
+    components: [],
+    reviewItems: [],
+    decisions: [],
+    evalSummary: null,
+  };
 }
 
 function applySourceSearchFilter(items, search) {

@@ -117,6 +117,7 @@ export default function ReviewQueue() {
   const pendingCount = items.filter((item) => item.status === "needs_review").length;
   const approvedCount = items.filter((item) => item.status === "approved").length;
   const conflictCount = items.filter((item) => item.kind === "conflict").length;
+  const filtersActive = status !== "all" || severity !== "all" || kind !== "all";
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -151,6 +152,25 @@ export default function ReviewQueue() {
         <SummaryCard label="Needs review" value={pendingCount} tone="amber" />
         <SummaryCard label="Conflicts" value={conflictCount} tone="red" />
         <SummaryCard label="Approved" value={approvedCount} tone="emerald" />
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white px-4 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Self-host review loop</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              This queue should stay focused on high-impact conflicts and low-confidence facts, not every extraction event.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+              Inspect sources
+            </Link>
+            <Link to="/app/query" className="font-medium text-brand-700 hover:text-brand-800">
+              Pressure-test query
+            </Link>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-[220px_220px_220px_minmax(0,1fr)]">
@@ -211,10 +231,7 @@ export default function ReviewQueue() {
       </div>
 
       {items.length === 0 ? (
-        <StatusView
-          query={{ isLoading: false, isError: false, data: [] }}
-          empty="No review items match the current filters."
-        />
+        <ReviewEmptyState filtersActive={filtersActive} />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
           <section
@@ -498,6 +515,29 @@ export default function ReviewQueue() {
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+function ReviewEmptyState({ filtersActive }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-6 text-center">
+      <p className="text-sm font-semibold text-gray-800">
+        {filtersActive ? "No review items match the current filters." : "No review items yet."}
+      </p>
+      <p className="mt-2 text-xs text-gray-500 max-w-2xl mx-auto">
+        {filtersActive
+          ? "Widen the current filters or inspect the underlying source documents to understand whether the queue is currently quiet for the right reasons."
+          : "That usually means either the workspace has not been synced yet, or the current ingestion pass did not produce conflicts or low-confidence facts that need operator review."}
+      </p>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
+        <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+          Open sources
+        </Link>
+        <Link to="/app/connectors" className="font-medium text-brand-700 hover:text-brand-800">
+          Open connectors
+        </Link>
+      </div>
     </div>
   );
 }

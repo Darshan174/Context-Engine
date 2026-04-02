@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useModels, useCreateModel } from "../api/hooks";
 import StatusView from "../components/StatusView";
 
@@ -21,7 +21,7 @@ export default function Models() {
       <Wrapper onAdd={() => setShowForm(true)} showAdd={!showForm}>
         {showForm
           ? <CreateModelForm onClose={() => setShowForm(false)} />
-          : <StatusView query={query} empty="No models yet. Create one to get started." />}
+          : <ModelsEmptyState onCreate={() => setShowForm(true)} />}
       </Wrapper>
     );
   }
@@ -72,7 +72,44 @@ function Wrapper({ children, onAdd, showAdd }) {
           </button>
         )}
       </div>
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Self-host modeling flow</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Models are the structured layer above raw source documents. Start with synced sources, then use models to inspect current and historical facts with provenance.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+              Inspect sources
+            </Link>
+            <Link to="/app/graph" className="font-medium text-brand-700 hover:text-brand-800">
+              Open graph
+            </Link>
+          </div>
+        </div>
+      </div>
       {children}
+    </div>
+  );
+}
+
+export function ModelsEmptyState({ onCreate }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-6 text-center">
+      <p className="text-sm font-semibold text-gray-800">No models yet. Create one to get started.</p>
+      <p className="mt-2 text-xs text-gray-500 max-w-2xl mx-auto">
+        In a self-hosted install, models usually become useful after you sync sources and start extracting components. You can still create one manually if you want to shape the knowledge graph first.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
+        <button type="button" onClick={onCreate} className="font-medium text-brand-700 hover:text-brand-800">
+          Create a model
+        </button>
+        <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+          Open sources
+        </Link>
+      </div>
     </div>
   );
 }

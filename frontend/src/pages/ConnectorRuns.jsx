@@ -71,6 +71,25 @@ export default function ConnectorRuns() {
         </Link>
       </div>
 
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">How this page gets populated</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Run history appears after a connector sync or document reprocess is queued. Use this page to verify worker outcomes before trusting downstream extraction and query state.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <Link to="/app/connectors" className="font-medium text-brand-700 hover:text-brand-800">
+              Queue syncs
+            </Link>
+            <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+              Inspect sources
+            </Link>
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
         <section className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
           <div>
@@ -158,8 +177,11 @@ export default function ConnectorRuns() {
             Live run history is unavailable in demo mode.
           </div>
         ) : jobs.length === 0 ? (
-          <div className="px-5 py-8 text-sm text-gray-500">
-            No sync or reprocess jobs have been recorded for this connector yet.
+          <div className="px-5 py-8 text-sm text-gray-500 space-y-2">
+            <p>No sync or reprocess jobs have been recorded for this connector yet.</p>
+            <p className="text-xs text-gray-400">
+              Queue the first connector sync, then come back here to inspect timestamps, worker outcomes, and document counts.
+            </p>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">

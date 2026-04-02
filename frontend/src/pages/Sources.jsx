@@ -16,6 +16,7 @@ const CONNECTOR_OPTIONS = [
   { value: "slack", label: "Slack" },
   { value: "notion", label: "Notion" },
   { value: "zoom", label: "Zoom" },
+  { value: "github", label: "GitHub" },
   { value: "gdrive", label: "Google Drive" },
   { value: "gong", label: "Gong" },
 ];
@@ -30,6 +31,7 @@ const CONNECTOR_PILL = {
   slack: "bg-violet-100 text-violet-700",
   notion: "bg-gray-100 text-gray-700",
   zoom: "bg-sky-100 text-sky-700",
+  github: "bg-slate-100 text-slate-700",
   gdrive: "bg-emerald-100 text-emerald-700",
   gong: "bg-indigo-100 text-indigo-700",
   unknown: "bg-slate-100 text-slate-600",
@@ -55,6 +57,7 @@ export default function Sources() {
   const documents = data ?? [];
   const [reprocessMessage, setReprocessMessage] = useState("");
   const [reprocessError, setReprocessError] = useState("");
+  const filtersActive = connector !== "all" || processed !== "all" || search.trim().length > 0;
   const selectedFromList = useMemo(
     () => documents.find((doc) => doc.id === documentId) ?? null,
     [documents, documentId],
@@ -210,10 +213,7 @@ export default function Sources() {
       </div>
 
       {documents.length === 0 ? (
-        <StatusView
-          query={{ isLoading: false, isError: false, data: [] }}
-          empty="No source documents match the current filters."
-        />
+        <SourceEmptyState filtersActive={filtersActive} />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
           <section
@@ -267,9 +267,11 @@ export default function Sources() {
                         )}
                       </div>
                       <p className="mt-2 text-sm font-medium text-gray-800 truncate">
-                        {doc.author || "Unknown author"}
+                        {formatDocumentListTitle(doc)}
                       </p>
-                      <p className="mt-1 text-xs text-gray-500 line-clamp-2">{doc.preview}</p>
+                      <p className="mt-1 text-xs text-gray-500 line-clamp-2">
+                        {formatDocumentListSubtitle(doc)}
+                      </p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[11px] text-gray-400">{formatDate(doc.createdAtSource)}</p>
@@ -374,6 +376,42 @@ export default function Sources() {
                   <dd className="text-gray-700">{selectedDocument.author || "Unknown"}</dd>
                   <dt className="text-gray-400">Location</dt>
                   <dd className="text-gray-700">{selectedDocument.location || "—"}</dd>
+                  {selectedDocument.repository && (
+                    <>
+                      <dt className="text-gray-400">Repository</dt>
+                      <dd className="text-gray-700">{selectedDocument.repository}</dd>
+                    </>
+                  )}
+                  {selectedDocument.documentTitle && (
+                    <>
+                      <dt className="text-gray-400">Title</dt>
+                      <dd className="text-gray-700">{selectedDocument.documentTitle}</dd>
+                    </>
+                  )}
+                  {selectedDocument.githubItemType && (
+                    <>
+                      <dt className="text-gray-400">GitHub item</dt>
+                      <dd className="text-gray-700">{selectedDocument.githubItemType.replaceAll("_", " ")}</dd>
+                    </>
+                  )}
+                  {selectedDocument.parentExternalId && (
+                    <>
+                      <dt className="text-gray-400">Parent</dt>
+                      <dd className="text-gray-700 break-all">{selectedDocument.parentExternalId}</dd>
+                    </>
+                  )}
+                  {selectedDocument.pullRequestReferences?.length > 0 && (
+                    <>
+                      <dt className="text-gray-400">PR refs</dt>
+                      <dd className="text-gray-700">{selectedDocument.pullRequestReferences.join(", ")}</dd>
+                    </>
+                  )}
+                  {selectedDocument.commitReferences?.length > 0 && (
+                    <>
+                      <dt className="text-gray-400">Commit refs</dt>
+                      <dd className="text-gray-700">{selectedDocument.commitReferences.join(", ")}</dd>
+                    </>
+                  )}
                   {selectedDocument.meetingTopic && (
                     <>
                       <dt className="text-gray-400">Meeting</dt>
@@ -573,6 +611,29 @@ export default function Sources() {
   );
 }
 
+function SourceEmptyState({ filtersActive }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-6 text-center">
+      <p className="text-sm font-semibold text-gray-800">
+        {filtersActive ? "No source documents match the current filters." : "No source documents yet."}
+      </p>
+      <p className="mt-2 text-xs text-gray-500 max-w-2xl mx-auto">
+        {filtersActive
+          ? "Widen the current filters or sync another source to bring more raw context into the workspace."
+          : "For a self-hosted install, connect Slack, Notion, or Zoom first, run the first sync, then come back here to inspect the raw documents before extraction."}
+      </p>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
+        <Link to="/app/connectors" className="font-medium text-brand-700 hover:text-brand-800">
+          Open connectors
+        </Link>
+        <Link to="/app/review" className="font-medium text-brand-700 hover:text-brand-800">
+          Open review queue
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function formatDate(value) {
   if (!value) return "—";
   try {
@@ -580,6 +641,26 @@ function formatDate(value) {
   } catch {
     return value;
   }
+}
+
+function formatDocumentListTitle(doc) {
+  if (doc.connectorType === "github") {
+    return doc.documentTitle || doc.location || doc.author || "GitHub item";
+  }
+  return doc.author || "Unknown author";
+}
+
+function formatDocumentListSubtitle(doc) {
+  if (doc.connectorType === "github") {
+    const parts = [
+      doc.repository,
+      doc.githubItemType ? doc.githubItemType.replaceAll("_", " ") : null,
+      doc.author,
+    ].filter(Boolean);
+    const prefix = parts.join(" · ");
+    return prefix ? `${prefix} · ${doc.preview}` : doc.preview;
+  }
+  return doc.preview;
 }
 
 function formatReviewDecisionTransition(decision) {

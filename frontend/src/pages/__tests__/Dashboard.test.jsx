@@ -277,6 +277,89 @@ describe("Dashboard", () => {
     expect(screen.getByRole("link", { name: "Models" })).toHaveAttribute("href", "/app/models");
   });
 
+  it("shows a self-host setup checklist for first-run workspaces", () => {
+    useDashboard.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        stats: [
+          { label: "Sources", value: 0, delta: "No connectors active" },
+          { label: "Models", value: 0, delta: "—" },
+          { label: "Components", value: 0, delta: "—" },
+          { label: "Relationships", value: 0, delta: "—" },
+        ],
+        activity: [],
+        alerts: [],
+      },
+      refetch: vi.fn(),
+    });
+
+    renderDashboard();
+
+    expect(screen.getByText("Self-host setup checklist")).toBeInTheDocument();
+    expect(screen.getByText("Connect a source")).toBeInTheDocument();
+    expect(screen.getByText("Run the first sync")).toBeInTheDocument();
+    expect(screen.getByText("Validate extracted context")).toBeInTheDocument();
+    expect(screen.getByText(/should be able to reach a source-backed query flow/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue setup" })).toHaveAttribute("href", "/app/connectors");
+  });
+
+  it("marks the setup checklist complete once sources are processed", () => {
+    useDashboard.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        stats: [
+          { label: "Sources", value: 12, delta: "2 connectors active" },
+          { label: "Models", value: 3, delta: "—" },
+          { label: "Components", value: 18, delta: "—" },
+          { label: "Relationships", value: 6, delta: "—" },
+        ],
+        activity: [],
+        alerts: [],
+      },
+      refetch: vi.fn(),
+    });
+    useConnectors.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      isMock: false,
+      data: [
+        {
+          type: "slack",
+          connectorId: "conn_slack",
+          name: "Slack",
+          description: "Channels",
+          status: "connected",
+          lastSync: "Apr 1, 2026, 11:05 AM",
+          itemsSynced: 10,
+          providerLabel: "Built in",
+          availability: "available",
+        },
+      ],
+      refetch: vi.fn(),
+    });
+    useConnectorProcessingSummary.mockReturnValue({
+      data: {
+        items: [
+          {
+            connectorType: "slack",
+            processedDocuments: 10,
+            unprocessedDocuments: 0,
+            totalDocuments: 10,
+          },
+        ],
+      },
+      refetch: vi.fn(),
+    });
+
+    renderDashboard();
+
+    expect(screen.getByRole("link", { name: "Start querying" })).toHaveAttribute("href", "/app/query");
+    expect(screen.getByText(/has completed the first-run path/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Done")).toHaveLength(3);
+  });
+
   it("degrades gracefully when activity and alerts are missing", () => {
     useDashboard.mockReturnValue({
       isLoading: false,

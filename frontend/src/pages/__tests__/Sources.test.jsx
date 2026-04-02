@@ -90,6 +90,28 @@ const baseDocuments = [
     recordingDate: "2026-03-31",
     sourceType: "zoom_transcript",
   },
+  {
+    id: "sd5",
+    connectorType: "github",
+    externalId: "github:acme/context-engine:pull_review_comment:8001",
+    author: "maintainer",
+    content:
+      "Repository: acme/context-engine\nReview Comment on Pull Request #77: Add eval CLI\n\ndecision: ship after PR #13 and commit abc1234.",
+    preview: "Review Comment on Pull Request #77: Add eval CLI",
+    sourceUrl: "https://github.com/acme/context-engine/pull/77#discussion_r8001",
+    createdAtSource: "2026-04-01T12:45:00Z",
+    ingestedAt: "2026-04-01T12:50:00Z",
+    processedAt: "2026-04-01T12:52:00Z",
+    processed: true,
+    location: "acme/context-engine",
+    repository: "acme/context-engine",
+    documentTitle: "Review Comment on Pull Request #77: Add eval CLI",
+    githubItemType: "pull_request_review_comment",
+    parentExternalId: "github:acme/context-engine:pull_request:77",
+    pullRequestReferences: ["acme/context-engine#13"],
+    commitReferences: ["abc1234"],
+    sourceType: "github_pull_request_review_comment",
+  },
 ];
 
 function renderSources(initialEntries = ["/app/sources"]) {
@@ -152,6 +174,22 @@ describe("Sources", () => {
     expect(screen.getByText("Loading...")).toBeInTheDocument();
   });
 
+  it("shows a self-host onboarding state when no sources exist yet", () => {
+    useSourceDocuments.mockReturnValue({
+      data: [],
+      isMock: false,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    renderSources();
+
+    expect(screen.getByText("No source documents yet.")).toBeInTheDocument();
+    expect(screen.getByText(/connect Slack, Notion, or Zoom first/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open connectors" })).toHaveAttribute("href", "/app/connectors");
+  });
+
   it("renders mock badge, summary, and selected document detail", () => {
     useSourceDocuments.mockReturnValue({
       data: baseDocuments,
@@ -167,7 +205,7 @@ describe("Sources", () => {
 
     expect(screen.getByText("Sources")).toBeInTheDocument();
     expect(screen.getByText(/Demo data/)).toBeInTheDocument();
-    expect(screen.getByText(/4 stored · 3 processed · 1 pending/)).toBeInTheDocument();
+    expect(screen.getByText(/5 stored · 4 processed · 1 pending/)).toBeInTheDocument();
     expect(within(detail).getByText("Alice")).toBeInTheDocument();
     expect(within(detail).getByText("Raw content")).toBeInTheDocument();
     expect(
@@ -277,6 +315,30 @@ describe("Sources", () => {
     expect(within(detail).getByText("zoom transcript")).toBeInTheDocument();
   });
 
+  it("renders GitHub metadata for engineering source documents", () => {
+    useSourceDocuments.mockReturnValue({
+      data: baseDocuments,
+      isMock: false,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      hasMore: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+      total: baseDocuments.length,
+    });
+
+    renderSources(["/app/sources/sd5"]);
+
+    const detail = screen.getByRole("region", { name: "Document detail" });
+    expect(within(detail).getByText("github")).toBeInTheDocument();
+    expect(within(detail).getAllByText("acme/context-engine")).toHaveLength(2);
+    expect(within(detail).getByText("Review Comment on Pull Request #77: Add eval CLI")).toBeInTheDocument();
+    expect(within(detail).getByText("pull request review comment")).toBeInTheDocument();
+    expect(within(detail).getByText("acme/context-engine#13")).toBeInTheDocument();
+    expect(within(detail).getByText("abc1234")).toBeInTheDocument();
+  });
+
   it("queues reprocess for a live source document", async () => {
     const mutate = vi.fn((_documentId, opts) => {
       opts.onSuccess({ jobType: "reprocess", status: "pending" });
@@ -344,6 +406,7 @@ describe("Sources", () => {
       "unprocessed",
     );
     expect(screen.getByText("No source documents match the current filters.")).toBeInTheDocument();
+    expect(screen.getByText(/Widen the current filters or sync another source/i)).toBeInTheDocument();
   });
 
   it("filters by search text", async () => {

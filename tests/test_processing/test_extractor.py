@@ -19,19 +19,29 @@ from app.processing.extractor import (
 )
 
 
-def _make_doc(content, *, channel="general", reply_count=None, meeting_topic=None):
+def _make_doc(
+    content,
+    *,
+    channel="general",
+    reply_count=None,
+    meeting_topic=None,
+    title=None,
+    connector_type=ConnectorType.SLACK,
+):
     meta = {}
     if channel is not None:
         meta["channel_name"] = channel
     if meeting_topic is not None:
         meta["meeting_topic"] = meeting_topic
+    if title is not None:
+        meta["title"] = title
     if reply_count is not None:
         meta["reply_count"] = reply_count
     doc = MagicMock(spec=SourceDocument)
     doc.content = content
     doc.metadata_json = meta
     doc.author = "test@example.com"
-    doc.connector_type = ConnectorType.SLACK
+    doc.connector_type = connector_type
     doc.external_id = f"slack:C123:{uuid4().hex}"
     return doc
 
@@ -140,6 +150,54 @@ class TestRegexExtractorRelationships:
         doc = _make_doc("decision: ship it")
         facts = await extractor.extract(doc)
         assert facts[0].relationships == []
+
+    async def test_github_explicit_decision_and_rationale(self, extractor):
+        doc = _make_doc(
+            (
+                "Repository: acme/context-engine\n"
+                "Pull Request #77: Migration plan\n"
+                "Referenced Pull Requests: acme/context-engine#12\n"
+                "Referenced Issues: acme/context-engine#31\n"
+                "Referenced Commits: abc1234\n"
+                "Review Commit: abc1234\n"
+                "Decision: use Postgres 16 rolling migration.\n"
+                "Rationale: avoids downtime during cutover.\n"
+            ),
+            channel=None,
+            title="Migration plan",
+            connector_type=ConnectorType.GITHUB,
+        )
+        facts = await extractor.extract(doc)
+
+        assert len(facts) == 2
+        decision = next(fact for fact in facts if fact.fact_type == "decision")
+        rationale = next(fact for fact in facts if fact.fact_type == "discussion")
+        assert decision.name == "Decision in Migration plan"
+        assert decision.value == "use Postgres 16 rolling migration"
+        assert rationale.name == "Discussion in Migration plan"
+        assert rationale.value == "Rationale: avoids downtime during cutover"
+        assert rationale.relationships[0].target_fact_name == "Decision in Migration plan"
+
+    async def test_zoom_meeting_extracts_outcome_and_owned_action_items(self, extractor):
+        doc = _make_doc(
+            (
+                "Founder: meeting outcome: launch pricing page on April 15.\n"
+                "Alice: action item: prepare demo environment.\n"
+                "Bob: AI: draft launch email.\n"
+            ),
+            channel=None,
+            meeting_topic="Weekly Product Review",
+            connector_type=ConnectorType.ZOOM,
+        )
+        facts = await extractor.extract(doc)
+
+        decisions = [fact for fact in facts if fact.fact_type == "decision"]
+        actions = [fact for fact in facts if fact.fact_type == "action_item"]
+        assert [fact.value for fact in decisions] == ["launch pricing page on April 15"]
+        assert [fact.value for fact in actions] == [
+            "Owner: Alice - prepare demo environment",
+            "Owner: Bob - draft launch email",
+        ]
 
 
 class TestStructuredLLMExtractor:

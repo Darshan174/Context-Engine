@@ -57,6 +57,22 @@ describe("Accuracy", () => {
     expect(screen.getByText("Loading...")).toBeInTheDocument();
   });
 
+  it("shows a self-host onboarding state when no eval summary exists yet", () => {
+    useEvalSummary.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      isMock: false,
+      data: null,
+      refetch: vi.fn(),
+    });
+
+    renderAccuracy();
+
+    expect(screen.getByText("Accuracy data is not ready yet for this workspace.")).toBeInTheDocument();
+    expect(screen.getByText(/python scripts\/run_eval_regression.py --workspace-id/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open sources" })).toHaveAttribute("href", "/app/sources");
+  });
+
   it("renders live accuracy summary, domains, metrics, and blockers", () => {
     useEvalSummary.mockReturnValue({
       isLoading: false,

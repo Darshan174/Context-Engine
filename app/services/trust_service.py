@@ -154,13 +154,25 @@ class TrustService:
         await self.session.commit()
         return await self.get_review_item(review_item_id)
 
-    async def list_component_sources(self, component_id: UUID) -> list[tuple[ComponentSource, SourceDocument]]:
+    async def list_component_sources(
+        self,
+        component_id: UUID,
+        workspace_id: UUID,
+    ) -> list[tuple[ComponentSource, SourceDocument]]:
+        await self._require_workspace(workspace_id)
+
         component = await self.session.scalar(
-            select(Component).where(Component.id == component_id)
+            select(Component)
+            .join(KnowledgeModel, Component.model_id == KnowledgeModel.id)
+            .where(
+                Component.id == component_id,
+                KnowledgeModel.workspace_id == workspace_id,
+            )
         )
         if component is None:
             raise TrustResourceNotFoundError("Component not found")
 
+        connector_ids_q = select(Connector.id).where(Connector.workspace_id == workspace_id)
         rows = await self.session.execute(
             select(ComponentSource, SourceDocument)
             .join(
@@ -169,6 +181,7 @@ class TrustService:
             )
             .where(
                 ComponentSource.component_id == component_id,
+                SourceDocument.connector_id.in_(connector_ids_q),
                 SourceDocument.deleted_at.is_(None),
             )
             .order_by(SourceDocument.ingested_at.desc(), SourceDocument.id.desc())
@@ -238,7 +251,10 @@ class TrustService:
             connector_id=connector.id,
             job_type="reprocess",
             status=SyncJobStatus.PENDING,
-            result_metadata={"document_id": str(document_id)},
+            result_metadata={
+                "trigger": "reprocess",
+                "document_id": str(document_id),
+            },
         )
         document.processed_at = None
         self.session.add(job)

@@ -15,12 +15,12 @@ from app.models.source import ConnectorType
 from app.schemas.connector import (
     ConnectorProcessingSummary,
     ConnectorRead,
+    GitHubConnectRequest,
     NotionConnectRequest,
     SyncJobDetail,
     SyncJobResponse,
     ZoomConnectRequest,
 )
-from app.schemas.knowledge import ComponentRead
 from app.schemas.source import SourceDocumentList, SourceDocumentRead
 from app.services.connector_service import (
     ConfigurationError,
@@ -71,6 +71,12 @@ def _serialize_connector(connector) -> ConnectorRead:
             provider_note = (
                 f"{strategy.note} OAuth-installed Zoom connections support "
                 "webhook-driven sync."
+            )
+    if connector.connector_type == ConnectorType.GITHUB:
+        auth_mode = (connector.config or {}).get("auth_mode")
+        if auth_mode == "manual_token":
+            provider_note = (
+                f"{strategy.note} Manual-token GitHub connections are polling-only."
             )
     return ConnectorRead(
         id=connector.id,
@@ -327,6 +333,30 @@ async def connect_zoom(
     return _serialize_connector(connector)
 
 
+@router.post("/connectors/github/connect", response_model=ConnectorRead)
+async def connect_github(
+    body: GitHubConnectRequest,
+    svc: ConnectorService = Depends(_service),
+) -> ConnectorRead:
+    try:
+        connector = await svc.connect_github(
+            workspace_id=body.workspace_id,
+            token=body.token,
+            repositories=body.repositories,
+        )
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
+    except ConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        )
+    return _serialize_connector(connector)
+
+
 # ── Connector actions (path-param routes AFTER static routes) ─────
 
 
@@ -533,69 +563,3 @@ async def get_source_document(
         metadata=d.metadata_json,
     )
 
-
-@router.post(
-    "/source-documents/{document_id}/reprocess",
-    response_model=SyncJobResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def reprocess_document(
-    document_id: UUID,
-    workspace_id: UUID,
-    svc: ConnectorService = Depends(_service),
-) -> SyncJobResponse:
-    """Re-queue extraction for a single source document."""
-    try:
-        job = await svc.reprocess_document(document_id, workspace_id)
-    except WorkspaceNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Workspace not found",
-        )
-    except ConnectorNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Source document not found",
-        )
-    except SyncInProgressError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
-        )
-    except SyncError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
-        )
-    return SyncJobResponse(
-        job_id=job.id,
-        job_type=job.job_type,
-        connector_id=job.connector_id,
-        status=job.status.value,
-        created_at=job.created_at,
-    )
-
-
-@router.get(
-    "/source-documents/{document_id}/components",
-    response_model=list[ComponentRead],
-)
-async def get_document_components(
-    document_id: UUID,
-    workspace_id: UUID,
-    svc: ConnectorService = Depends(_service),
-) -> list[ComponentRead]:
-    """Return all knowledge components derived from a source document."""
-    try:
-        components = await svc.get_document_components(document_id, workspace_id)
-    except WorkspaceNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Workspace not found",
-        )
-    except ConnectorNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Source document not found",
-        )
-    return [ComponentRead.model_validate(c) for c in components]

@@ -275,6 +275,59 @@ class ConnectorService:
         await self.session.refresh(connector)
         return connector
 
+    async def connect_github(
+        self,
+        *,
+        workspace_id: UUID,
+        token: str,
+        repositories: list[str],
+    ) -> Connector:
+        """Create or update a GitHub connector with a manual access token."""
+        await self._require_workspace(workspace_id)
+
+        try:
+            encrypted = encrypt_token(token)
+        except EncryptionError as exc:
+            raise ConfigurationError(str(exc)) from exc
+
+        connector = await self.session.scalar(
+            select(Connector).where(
+                Connector.workspace_id == workspace_id,
+                Connector.connector_type == ConnectorType.GITHUB,
+            )
+        )
+
+        base_config = {
+            "ingestion_mode": "issues_pull_requests_reviews_comments",
+            "source_focus": "engineering_system_of_record",
+            "auth_mode": "manual_token",
+            "sync_delivery_mode": "polling_only",
+            "webhook_auto_sync": False,
+            "repositories": repositories,
+        }
+
+        if connector is None:
+            connector = Connector(
+                workspace_id=workspace_id,
+                connector_type=ConnectorType.GITHUB,
+                status=ConnectorStatus.CONNECTED,
+                oauth_token_encrypted=encrypted,
+                config=base_config,
+            )
+            self.session.add(connector)
+        else:
+            connector.status = ConnectorStatus.CONNECTED
+            connector.oauth_token_encrypted = encrypted
+            connector.refresh_token_encrypted = None
+            connector.config = {
+                **connector.config,
+                **base_config,
+            }
+
+        await self.session.commit()
+        await self.session.refresh(connector)
+        return connector
+
     async def build_zoom_install_url(self, workspace_id: UUID) -> str:
         self._require_zoom_oauth_config()
         await self._require_workspace(workspace_id)
@@ -591,81 +644,6 @@ class ConnectorService:
         if doc is None:
             raise ConnectorNotFoundError("Source document not found")
         return doc
-
-    async def reprocess_document(
-        self, document_id: UUID, workspace_id: UUID
-    ) -> "SyncJob":
-        """Queue a single-document re-extraction job."""
-        from app.models.job import SyncJob, SyncJobStatus
-
-        doc = await self.get_source_document(document_id, workspace_id)
-
-        # Guard: reject if a sync or reprocess is already in-flight
-        existing = await self.session.scalar(
-            select(SyncJob).where(
-                SyncJob.connector_id == doc.connector_id,
-                SyncJob.status.in_([SyncJobStatus.PENDING, SyncJobStatus.RUNNING]),
-            )
-        )
-        if existing is not None:
-            raise SyncInProgressError(existing.id)
-
-        doc.processed_at = None
-
-        job = SyncJob(
-            connector_id=doc.connector_id,
-            job_type="reprocess",
-            status=SyncJobStatus.PENDING,
-            result_metadata={
-                "trigger": "reprocess",
-                "document_id": str(doc.id),
-            },
-        )
-        self.session.add(job)
-        await self.session.commit()
-        await self.session.refresh(job)
-
-        dispatch_exc: Exception | None = None
-        try:
-            from app.tasks.ingestion import run_ingestion
-            run_ingestion.delay(str(job.id), str(doc.id))
-        except Exception as exc:
-            dispatch_exc = exc
-
-        if dispatch_exc is not None:
-            job.status = SyncJobStatus.FAILED
-            job.error_type = "DispatchError"
-            job.error_message = str(dispatch_exc)
-            await self.session.commit()
-            raise SyncError(f"Failed to dispatch ingestion task: {dispatch_exc}") from dispatch_exc
-
-        await self.session.commit()
-        await self.session.refresh(job)
-        return job
-
-    async def get_document_components(
-        self, document_id: UUID, workspace_id: UUID
-    ) -> list:
-        """Return all components derived from a source document."""
-        from app.models.knowledge import Component as _Component
-        from app.models.review import ReviewItem as _ReviewItem
-        from sqlalchemy.orm import selectinload
-
-        doc = await self.get_source_document(document_id, workspace_id)
-        doc_with_components = await self.session.scalar(
-            select(SourceDocument)
-            .options(
-                selectinload(SourceDocument.components)
-                .selectinload(_Component.source_documents),
-                selectinload(SourceDocument.components)
-                .selectinload(_Component.review_item)
-                .selectinload(_ReviewItem.decision_history),
-                selectinload(SourceDocument.components)
-                .selectinload(_Component.model),
-            )
-            .where(SourceDocument.id == doc.id)
-        )
-        return doc_with_components.components if doc_with_components else []
 
     async def get_processing_summary(
         self, workspace_id: UUID

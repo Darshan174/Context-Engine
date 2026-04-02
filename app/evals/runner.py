@@ -202,41 +202,43 @@ async def _run(
     from app.services.query_service import QueryService
 
     engine = create_async_engine(settings.database_url, poolclass=NullPool)
-    async with engine.connect() as conn:
-        session = AsyncSession(bind=conn)
-        try:
-            # Find the first workspace
-            from sqlalchemy import select
+    try:
+        async with engine.connect() as conn:
+            session = AsyncSession(bind=conn)
+            try:
+                # Find the first workspace
+                from sqlalchemy import select
 
-            workspace = None
-            if workspace_id is not None:
-                workspace = await session.scalar(
-                    select(Workspace).where(Workspace.id == workspace_id).limit(1)
+                workspace = None
+                if workspace_id is not None:
+                    workspace = await session.scalar(
+                        select(Workspace).where(Workspace.id == workspace_id).limit(1)
+                    )
+                else:
+                    workspace = await session.scalar(select(Workspace).limit(1))
+                if workspace is None:
+                    print("ERROR: No workspace found in the database.", file=sys.stderr)
+                    sys.exit(2)
+
+                cases = load_default_cases(domains=domains)
+
+                if not cases:
+                    print("ERROR: No eval cases matched the filters.", file=sys.stderr)
+                    sys.exit(2)
+
+                harness = StartupEvalHarness(
+                    QueryService(session),
+                    pass_threshold=threshold,
                 )
-            else:
-                workspace = await session.scalar(select(Workspace).limit(1))
-            if workspace is None:
-                print("ERROR: No workspace found in the database.", file=sys.stderr)
-                sys.exit(2)
-
-            cases = load_default_cases(domains=domains)
-
-            if not cases:
-                print("ERROR: No eval cases matched the filters.", file=sys.stderr)
-                sys.exit(2)
-
-            harness = StartupEvalHarness(
-                QueryService(session),
-                pass_threshold=threshold,
-            )
-            summary = await harness.run(
-                workspace_id=workspace.id,
-                cases=cases,
-            )
-            return summary
-        finally:
-            await session.close()
-    await engine.dispose()
+                summary = await harness.run(
+                    workspace_id=workspace.id,
+                    cases=cases,
+                )
+                return summary
+            finally:
+                await session.close()
+    finally:
+        await engine.dispose()
 
 
 def main() -> None:

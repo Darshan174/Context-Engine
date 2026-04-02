@@ -161,10 +161,16 @@ async def supersede_review_item(
 )
 async def list_component_sources(
     component_id: UUID,
+    workspace_id: UUID,
     service: TrustService = Depends(get_trust_service),
 ) -> list[ComponentSourceRead]:
     try:
-        rows = await service.list_component_sources(component_id)
+        rows = await service.list_component_sources(component_id, workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
     except TrustResourceNotFoundError:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,

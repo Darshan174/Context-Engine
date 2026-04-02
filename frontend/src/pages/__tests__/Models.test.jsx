@@ -53,6 +53,9 @@ describe("Models — create flow", () => {
 
     renderModels();
     expect(screen.getByText("No models yet. Create one to get started.")).toBeInTheDocument();
+    expect(screen.getByText("Self-host modeling flow")).toBeInTheDocument();
+    expect(screen.getByText(/usually become useful after you sync sources/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open sources" })).toHaveAttribute("href", "/app/sources");
   });
 
   it("shows model cards when models exist", () => {

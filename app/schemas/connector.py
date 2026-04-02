@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any
 from uuid import UUID
 
@@ -83,6 +84,41 @@ class ZoomConnectRequest(BaseModel):
         if not v.strip():
             raise ValueError("Zoom access token must not be blank")
         return v
+
+
+class GitHubConnectRequest(BaseModel):
+    workspace_id: UUID
+    token: str
+    repositories: list[str]
+
+    @field_validator("token")
+    @classmethod
+    def token_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("GitHub access token must not be blank")
+        return v
+
+    @field_validator("repositories")
+    @classmethod
+    def repositories_valid(cls, value: list[str]) -> list[str]:
+        repos = []
+        seen: set[str] = set()
+        pattern = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+        for repo in value:
+            normalized = repo.strip().lower()
+            if not normalized:
+                continue
+            if not pattern.match(normalized):
+                raise ValueError(
+                    "Repositories must use owner/repo format"
+                )
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            repos.append(normalized)
+        if not repos:
+            raise ValueError("At least one GitHub repository must be provided")
+        return repos
 
 
 class ConnectorProcessingSummary(BaseModel):

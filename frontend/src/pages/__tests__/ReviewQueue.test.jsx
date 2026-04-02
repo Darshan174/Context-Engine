@@ -161,6 +161,7 @@ describe("ReviewQueue", () => {
 
     const detail = screen.getByRole("region", { name: "Review detail" });
     expect(screen.getByText("Review Queue")).toBeInTheDocument();
+    expect(screen.getByText("Self-host review loop")).toBeInTheDocument();
     expect(screen.getByText(/2 pending · 1 approved · 1 conflicts/)).toBeInTheDocument();
     expect(within(detail).getByText("Enterprise pricing changed across Slack and Notion")).toBeInTheDocument();
     expect(within(detail).getByText(/Two high-authority sources disagree/)).toBeInTheDocument();
@@ -216,6 +217,22 @@ describe("ReviewQueue", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Filter review queue by severity"), "high");
     expect(screen.getByText("No review items match the current filters.")).toBeInTheDocument();
+    expect(screen.getByText(/Widen the current filters or inspect the underlying source documents/i)).toBeInTheDocument();
+  });
+
+  it("shows an onboarding state when the queue has no items", () => {
+    useReviewQueue.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    renderReviewQueue();
+
+    expect(screen.getByText("No review items yet.")).toBeInTheDocument();
+    expect(screen.getByText(/workspace has not been synced yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open sources" })).toHaveAttribute("href", "/app/sources");
   });
 
   it("filters by type", async () => {

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import Connectors from "../Connectors";
 
 vi.mock("../../api/hooks", () => ({
+  useConnectGitHub: vi.fn(),
   useConnectZoom: vi.fn(),
   useConnectNotion: vi.fn(),
   useConnectorSyncJobs: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("../../context/WorkspaceContext", () => ({
 }));
 
 import {
+  useConnectGitHub,
   useConnectZoom,
   useConnectNotion,
   useConnectorSyncJobs,
@@ -58,6 +60,12 @@ const connectZoomMut = {
   variables: undefined,
 };
 
+const connectGitHubMut = {
+  mutate: vi.fn(),
+  isPending: false,
+  variables: undefined,
+};
+
 function mockConnectorsQuery(overrides = {}) {
   const value = {
     data: [],
@@ -85,6 +93,8 @@ beforeEach(() => {
   disconnectMut.mutate.mockReset();
   connectNotionMut.mutate.mockReset();
   connectZoomMut.mutate.mockReset();
+  connectGitHubMut.mutate.mockReset();
+  useConnectGitHub.mockReturnValue(connectGitHubMut);
   useConnectZoom.mockReturnValue(connectZoomMut);
   useConnectNotion.mockReturnValue(connectNotionMut);
   useConnectorSyncJobs.mockReturnValue({
@@ -142,6 +152,9 @@ describe("Connectors", () => {
 
     renderConnectors();
     expect(screen.getByText("No connectors configured.")).toBeInTheDocument();
+    expect(screen.getByText("Self-host quick path")).toBeInTheDocument();
+    expect(screen.getByText("1. Connect a source")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open sources" })).toHaveAttribute("href", "/app/sources");
   });
 
   it("renders demo note and disables actions when mock-backed", () => {
@@ -320,6 +333,44 @@ describe("Connectors", () => {
     expect(screen.getByRole("link", { name: "Refresh OAuth" })).toHaveAttribute(
       "href",
       "/api/connectors/slack/install?workspace_id=ws_1",
+    );
+  });
+
+  it("connects GitHub with a token and repository list", async () => {
+    mockConnectorsQuery({
+      data: [
+        {
+          type: "github",
+          connectorId: null,
+          name: "GitHub",
+          description: "Issues and pull requests",
+          status: "disconnected",
+          lastSync: "Never",
+          itemsSynced: 0,
+          color: "#24292F",
+          availability: "available",
+          provider: "official_api",
+          providerLabel: "Official API",
+        },
+      ],
+    });
+
+    renderConnectors();
+
+    await userEvent.click(screen.getByRole("button", { name: "Connect GitHub" }));
+    await userEvent.type(screen.getByLabelText("GitHub access token"), "ghp_test_token");
+    await userEvent.type(
+      screen.getByLabelText("Repositories"),
+      "acme/context-engine{enter}acme/platform",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save GitHub token" }));
+
+    expect(connectGitHubMut.mutate).toHaveBeenCalledWith(
+      {
+        token: "ghp_test_token",
+        repositories: ["acme/context-engine", "acme/platform"],
+      },
+      expect.any(Object),
     );
   });
 

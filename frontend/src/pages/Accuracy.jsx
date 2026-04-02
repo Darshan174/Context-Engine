@@ -50,10 +50,18 @@ export default function Accuracy() {
     setSearchParams(next, { replace: true });
   }, [searchParams, selectedDomain, setSearchParams, summary]);
 
-  if (query.isLoading || query.isError || !summary) {
+  if (query.isLoading || query.isError) {
     return (
       <div className="max-w-6xl mx-auto">
         <StatusView query={query} empty="No eval summary available yet." />
+      </div>
+    );
+  }
+
+  if (!summary) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <AccuracyEmptyState />
       </div>
     );
   }
@@ -273,6 +281,67 @@ export default function Accuracy() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function AccuracyEmptyState() {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">Accuracy</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Accuracy data is not ready yet for this workspace.
+          </p>
+        </div>
+        <Link
+          to="/app/sources"
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Open sources
+        </Link>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <QuickStartCard
+          title="1. Sync real sources"
+          description="Accuracy runs only become meaningful after Slack, Notion, Zoom, or other connectors have stored source documents."
+        />
+        <QuickStartCard
+          title="2. Review extracted facts"
+          description="Resolve low-confidence or conflicting facts first so the eval run reflects real trust policy, not a half-reviewed workspace."
+        />
+        <QuickStartCard
+          title="3. Run the eval command"
+          description="From the backend, run the eval regression command for the selected workspace so this dashboard has live results to display."
+        />
+      </div>
+
+      <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 px-4 py-4">
+        <p className="text-xs font-medium text-gray-700">Typical self-host flow</p>
+        <code className="mt-2 block rounded-lg bg-gray-900 px-3 py-3 text-xs text-gray-100 overflow-x-auto">
+          python scripts/run_eval_regression.py --workspace-id &lt;workspace-id&gt;
+        </code>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-4 text-xs">
+        <Link to="/app/review" className="font-medium text-brand-700 hover:text-brand-800">
+          Open review queue
+        </Link>
+        <Link to="/app/query" className="font-medium text-brand-700 hover:text-brand-800">
+          Open query
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function QuickStartCard({ title, description }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-4">
+      <p className="text-sm font-semibold text-gray-800">{title}</p>
+      <p className="mt-2 text-xs text-gray-600">{description}</p>
     </div>
   );
 }

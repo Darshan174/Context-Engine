@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import GraphVisualizer from "../components/GraphVisualizer";
 import RelationshipEdge from "../components/RelationshipEdge";
 import StatusView from "../components/StatusView";
@@ -46,6 +47,25 @@ export default function KnowledgeGraph() {
         )}
       </div>
 
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">How to read this graph</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              The graph shows how models, components, and source nodes connect. It is most useful after source syncs and extraction have produced structured facts with provenance.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <Link to="/app/models" className="font-medium text-brand-700 hover:text-brand-800">
+              Models
+            </Link>
+            <Link to="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+              Sources
+            </Link>
+          </div>
+        </div>
+      </div>
+
       {/* ── Controls ────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
         <input
@@ -85,7 +105,12 @@ export default function KnowledgeGraph() {
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Relationships</h3>
         {filteredEdges.length === 0 ? (
-          <p className="text-sm text-gray-400">No relationships match your filters.</p>
+          <div className="space-y-2">
+            <p className="text-sm text-gray-400">No relationships match your filters.</p>
+            <p className="text-xs text-gray-500">
+              If the graph still looks empty after syncing sources, inspect Models and Review to confirm components and relationships have actually been extracted.
+            </p>
+          </div>
         ) : (
           <div className="divide-y divide-gray-100">
             {filteredEdges.map((e) => {

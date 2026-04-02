@@ -13,6 +13,7 @@ from app.models.job import SyncJob, SyncJobStatus
 from app.models.knowledge import Component, ComponentSource, KnowledgeModel
 from app.models.review import ReviewItem
 from app.models.source import ConnectorType, SourceDocument
+from app.models.user import Workspace
 
 
 def _make_connector(workspace_id, connector_type=ConnectorType.SLACK):
@@ -224,7 +225,10 @@ class TestProvenanceEndpoints:
     async def test_component_sources(self, client, workspace, db_session):
         seeded = await _seed_component_graph(db_session, workspace)
 
-        resp = await client.get(f"/api/components/{seeded['component'].id}/sources")
+        resp = await client.get(
+            f"/api/components/{seeded['component'].id}/sources",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
         body = resp.json()
         assert len(body) == 2
@@ -232,9 +236,26 @@ class TestProvenanceEndpoints:
             "#pricing enterprise decision",
             "Pricing strategy page",
         }
-        assert all(item["extraction_context"] is not None for item in body)
+        contexts = {item["extraction_context"] for item in body}
+        assert "Extracted from pricing thread" in contexts
+        assert None in contexts
+        assert all(item["id"] for item in body)
         schema_versions = {item["extractor_schema_version"] for item in body}
         assert "fact_extraction.v1" in schema_versions
+
+    async def test_component_sources_wrong_workspace_returns_404(
+        self, client, workspace, db_session
+    ):
+        seeded = await _seed_component_graph(db_session, workspace)
+        other_workspace = Workspace(id=uuid4(), name="Other Workspace")
+        db_session.add(other_workspace)
+        await db_session.flush()
+
+        resp = await client.get(
+            f"/api/components/{seeded['component'].id}/sources",
+            params={"workspace_id": str(other_workspace.id)},
+        )
+        assert resp.status_code == 404
 
     async def test_source_document_components(self, client, workspace, db_session):
         seeded = await _seed_component_graph(db_session, workspace)
@@ -262,11 +283,13 @@ class TestProvenanceEndpoints:
         self, client, workspace, db_session
     ):
         seeded = await _seed_component_graph(db_session, workspace)
-        other_workspace_id = uuid4()
+        other_workspace = Workspace(id=uuid4(), name="Other Workspace")
+        db_session.add(other_workspace)
+        await db_session.flush()
 
         resp = await client.get(
             f"/api/source-documents/{seeded['slack_doc'].id}/components",
-            params={"workspace_id": str(other_workspace_id)},
+            params={"workspace_id": str(other_workspace.id)},
         )
         assert resp.status_code == 404
 

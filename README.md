@@ -4,15 +4,16 @@ Context Engine is an infrastructure product that ingests unstructured company
 data, organizes it into a structured knowledge graph, and exposes that graph
 through a Context API for downstream AI systems.
 
-## Phase 1 Scope
+## Current Backend Scope
 
 This repository currently includes the foundation for:
 
 - FastAPI application bootstrap
 - Async SQLAlchemy database wiring
 - Alembic migration scaffold
-- Docker Compose services for PostgreSQL and Redis
-- Backend project structure for later CRUD, connector, and processing work
+- Docker Compose services for PostgreSQL, Redis, API, and worker
+- Connector-backed ingestion for Slack, Notion, Zoom transcripts, and GitHub issues / pull requests
+- Query, provenance, review, temporal, and eval flows for source-backed answers
 
 ## Connector Strategy
 
@@ -20,6 +21,7 @@ The connector layer is intentionally mixed:
 
 - `Slack` stays built in because OAuth, thread expansion, and real-time events are product-critical.
 - `Notion` is planned to use a `dlt` verified source rather than a full hand-built sync.
+- `GitHub` stays narrow and native for now because issues and pull requests are high-signal engineering context without needing a full repo mirror.
 - `Google Drive` is planned to use `Unstructured` for ingestion and document extraction.
 - `Gong` is expected to stay on the official API because transcript semantics matter more than generic ETL.
 
@@ -28,22 +30,30 @@ This keeps the product-specific parts in-house while reusing OSS where it actual
 ## Quick Start
 
 1. Copy `.env.example` to `.env`
-2. Start infrastructure:
+2. Generate an `ENCRYPTION_KEY` before using manual-token connectors:
 
 ```bash
-docker-compose up -d
+python - <<'PY'
+from cryptography.fernet import Fernet
+print(Fernet.generate_key().decode())
+PY
 ```
 
-If your Docker install supports the newer subcommand style, `docker compose up -d`
-works too.
+Put that value into `.env` as `ENCRYPTION_KEY=...`.
 
-3. Install dependencies with your preferred environment manager, for example:
+3. Start the backend stack:
+
+```bash
+docker compose up -d postgres redis api worker
+```
+
+4. Install dependencies with your preferred environment manager, for example:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-4. Run a quick local preflight:
+5. Run a quick local preflight if you are starting services outside Compose:
 
 ```bash
 python scripts/preflight_phase1.py
@@ -65,19 +75,21 @@ alembic upgrade head
 python scripts/preflight_phase1.py --require-api
 ```
 
-5. Run the initial migration:
+6. Run the migration locally when you are not relying on the Compose `api` container:
 
 ```bash
 alembic upgrade head
 ```
 
-6. Seed demo data if you want sample records:
+7. Seed the deterministic demo workspace used by the smoke and eval flows:
 
 ```bash
-python scripts/seed_demo.py
+python scripts/seed_demo.py --json --replace-existing
 ```
 
-7. Run the API:
+This prints a stable `workspace_id` you can reuse for local eval runs.
+
+8. If you are not using the Compose `api` service, run the API manually:
 
 ```bash
 uvicorn app.main:app --reload
@@ -89,7 +101,7 @@ If port `8000` is already in use:
 uvicorn app.main:app --reload --port 8001
 ```
 
-8. Create a workspace if you want an empty workspace for manual CRUD testing:
+9. Create an empty workspace only if you want manual CRUD testing outside the seeded demo:
 
 ```bash
 curl -X POST http://localhost:8000/api/workspaces \
@@ -97,14 +109,14 @@ curl -X POST http://localhost:8000/api/workspaces \
   -d '{"name":"Acme Demo","description":"Local test workspace"}'
 ```
 
-9. Run the automated Phase 1 smoke test against the live API:
+10. Run the automated backend smoke test against the live API:
 
 ```bash
 python scripts/smoke_phase1.py
 ```
 
 This validates health/readiness, workspace bootstrap, model/component/relationship
-CRUD, and the MVP `/api/query` response path.
+CRUD, and the `/api/query` response path.
 
 If the API is running on a different port, pass `--base-url`, for example:
 
@@ -119,7 +131,8 @@ python scripts/smoke_phase1.py --base-url http://localhost:8001
 
 ## Accuracy Runtime Config
 
-For provider-backed structured extraction and embeddings, set:
+Provider-backed structured extraction and embeddings are optional in local OSS
+setups. Leave the keys blank to stay offline. For real models, set:
 
 ```bash
 EXTRACTION_MODEL=openai/gpt-4.1-mini
@@ -135,7 +148,7 @@ model env vars are omitted, the backend will fall back to the default provider
 models above. In `production`, missing real extraction or embedding models are
 treated as configuration errors rather than silently relying on local fallbacks.
 
-For production Zoom ingestion, also set:
+For production Zoom OAuth + webhook ingestion, also set:
 
 ```bash
 ZOOM_CLIENT_ID=...
@@ -149,26 +162,35 @@ The Zoom connector remains transcript-only. Webhooks now require valid
 OAuth-installed Zoom connectors support webhook-driven sync. Manual-token Zoom
 connections remain polling-only by design.
 
+GitHub does not require app-level env vars for the first pass. Use
+`POST /api/connectors/github/connect` with a manual token plus a repository list.
+
 ## Eval Regression
 
-Run the startup-question regression harness against a seeded workspace:
+Run the startup-question regression harness against the seeded demo workspace:
 
 ```bash
-python scripts/run_eval_regression.py --workspace-id REPLACE_WITH_WORKSPACE_ID
+context-engine-eval-regression --workspace-id REPLACE_WITH_WORKSPACE_ID --json
 ```
 
-Optional thresholds:
+The existing script wrapper still works:
 
 ```bash
-python scripts/run_eval_regression.py \
-  --workspace-id REPLACE_WITH_WORKSPACE_ID \
-  --min-retrieval 0.85 \
-  --min-fact-correctness 0.85 \
-  --min-answer-correctness 0.80
+python scripts/run_eval_regression.py --workspace-id REPLACE_WITH_WORKSPACE_ID --json
 ```
 
-The repository also includes a DB-backed gold-set regression test in
-`tests/test_evals/test_gold_set.py`, intended for CI gating.
+Phase 3B is currently frozen against these exit criteria:
+
+- `25` total gold-set cases
+- `5` required domains: `pricing`, `blocker`, `roadmap`, `decision`, `meeting`
+- `>= 0.80` pass rate
+- `>= 0.80` average retrieval hit quality
+- `>= 0.80` average extracted fact correctness
+- `>= 0.75` average final answer correctness
+- `<= 0.25` confidence calibration error
+
+CI enforces both the DB-backed regression tests and the CLI eval run via
+`.github/workflows/backend-accuracy.yml`.
 
 ## CRUD Smoke Test
 

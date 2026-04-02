@@ -43,6 +43,7 @@ class SyncExecutor:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self._current_connector_config: dict[str, object] = {}
 
     async def run(self, connector: Connector, token: str) -> SyncResult:
         """Run the full sync pipeline.  Updates connector and SyncState in-place.
@@ -50,6 +51,7 @@ class SyncExecutor:
         Raises SyncError (wrapping AuthenticationError or ConnectorError) on failure.
         The connector.config is updated with structured ``last_error`` on failure.
         """
+        self._current_connector_config = connector.config or {}
         impl = self._resolve_connector(connector.connector_type, token)
         sync_state = await self._get_or_create_sync_state(connector)
 
@@ -150,6 +152,8 @@ class SyncExecutor:
         except ConnectorError as exc:
             await self._record_error(connector, exc, mark_error_status=False)
             raise SyncError(str(exc)) from exc
+        finally:
+            self._current_connector_config = {}
 
     async def _record_error(
         self,
@@ -180,6 +184,7 @@ class SyncExecutor:
         from app.connectors.notion import NotionConnector
         from app.connectors.slack import SlackConnector
         from app.connectors.zoom import ZoomConnector
+        from app.connectors.github import GitHubConnector
 
         if connector_type == ConnectorType.SLACK:
             return SlackConnector(token)
@@ -187,6 +192,11 @@ class SyncExecutor:
             return NotionConnector(token)
         if connector_type == ConnectorType.ZOOM:
             return ZoomConnector(token)
+        if connector_type == ConnectorType.GITHUB:
+            repositories = self._current_connector_config.get("repositories") or []
+            if not isinstance(repositories, list) or not repositories:
+                raise SyncError("GitHub connector requires at least one configured repository")
+            return GitHubConnector(token, repositories=[str(item) for item in repositories])
         raise SyncError(f"No connector implementation for {connector_type.value}")
 
     async def _get_or_create_sync_state(self, connector: Connector) -> SyncState:
@@ -286,6 +296,34 @@ class SyncExecutor:
 
             candidate = {
                 "recording_start": document.created_at.isoformat(),
+                "external_id": document.external_id,
+            }
+            if (
+                current_ts is None
+                or document.created_at > current_ts
+                or (
+                    document.created_at == current_ts
+                    and document.external_id > current_external_id
+                )
+            ):
+                return json.dumps(candidate, sort_keys=True)
+            return current_cursor
+
+        if connector_type == ConnectorType.GITHUB:
+            current_ts: datetime | None = None
+            current_external_id: str = ""
+            if current_cursor:
+                try:
+                    payload = json.loads(current_cursor)
+                    current_ts = datetime.fromisoformat(
+                        payload["updated_at"].replace("Z", "+00:00")
+                    )
+                    current_external_id = str(payload.get("external_id") or "")
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    current_ts = None
+
+            candidate = {
+                "updated_at": document.created_at.isoformat(),
                 "external_id": document.external_id,
             }
             if (

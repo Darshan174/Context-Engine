@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  useConnectGitHub,
   useConnectZoom,
   useConnectNotion,
   useConnectorSyncJobs,
@@ -52,6 +53,7 @@ export default function Connectors() {
   const { selectedId } = useWorkspaceSelection();
   const connectNotionMut = useConnectNotion();
   const connectZoomMut = useConnectZoom();
+  const connectGitHubMut = useConnectGitHub();
   const syncMut = useSyncConnector();
   const disconnectMut = useDisconnectConnector();
   const [actionError, setActionError] = useState(null);
@@ -61,6 +63,9 @@ export default function Connectors() {
   const [notionToken, setNotionToken] = useState("");
   const [zoomFormOpen, setZoomFormOpen] = useState(false);
   const [zoomToken, setZoomToken] = useState("");
+  const [githubFormOpen, setGitHubFormOpen] = useState(false);
+  const [githubToken, setGitHubToken] = useState("");
+  const [githubRepositories, setGitHubRepositories] = useState("");
 
   const workspaceId = useMemo(
     () => resolveWorkspaceId(workspaces.data, selectedId),
@@ -208,7 +213,7 @@ export default function Connectors() {
           </div>
           <p className="text-xs text-gray-400 mt-1">
             Slack is the native reference connector, Notion is the first OSS-backed path, and Zoom is the
-            transcript-first meeting source. Drive and Gong stay visible here so the admin surface is stable
+            transcript-first meeting source. GitHub adds PRs, issues, and reviews so engineering context is first-class. Drive and Gong stay visible here so the admin surface is stable
             while the backend expands.
           </p>
           {isMock && (
@@ -220,7 +225,41 @@ export default function Connectors() {
         </div>
         <div className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-right">
           <p className="text-[11px] uppercase tracking-wide text-gray-400">Phase</p>
-          <p className="text-sm font-medium text-gray-700">Slack + Notion + Zoom</p>
+          <p className="text-sm font-medium text-gray-700">Slack + Notion + Zoom + GitHub</p>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Self-host quick path</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              For a fresh install, the shortest path is connect a source, run the first sync, then inspect Sources before trusting Query answers.
+            </p>
+          </div>
+          <Link to="/app/sources" className="text-xs font-medium text-brand-700 hover:text-brand-800">
+            Open sources
+          </Link>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <QuickPathStep
+            title="1. Connect a source"
+            description="Start with Slack, Notion, or Zoom so the workspace has real context to ingest."
+            to="/app/connectors"
+            action="Connectors"
+          />
+          <QuickPathStep
+            title="2. Run the first sync"
+            description="Queue a sync from the connector card and wait for raw documents to land in the source store."
+            to="/app/connectors"
+            action="Run sync"
+          />
+          <QuickPathStep
+            title="3. Validate trust"
+            description="Use Sources, Review, and Accuracy to verify what the system extracted before relying on it."
+            to="/app/review"
+            action="Open review"
+          />
         </div>
       </div>
 
@@ -266,6 +305,13 @@ export default function Connectors() {
               onChangeZoomToken={setZoomToken}
               onToggleZoomForm={() => setZoomFormOpen((current) => !current)}
               connectZoomMut={connectZoomMut}
+              githubFormOpen={connector.type === "github" ? githubFormOpen : false}
+              githubToken={githubToken}
+              githubRepositories={githubRepositories}
+              onChangeGitHubToken={setGitHubToken}
+              onChangeGitHubRepositories={setGitHubRepositories}
+              onToggleGitHubForm={() => setGitHubFormOpen((current) => !current)}
+              connectGitHubMut={connectGitHubMut}
               syncMut={syncMut}
               disconnectMut={disconnectMut}
               onActionError={setActionError}
@@ -276,6 +322,18 @@ export default function Connectors() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function QuickPathStep({ title, description, to, action }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-4">
+      <p className="text-sm font-semibold text-gray-800">{title}</p>
+      <p className="mt-2 text-xs text-gray-600">{description}</p>
+      <Link to={to} className="mt-4 inline-flex text-xs font-medium text-brand-700 hover:text-brand-800">
+        {action}
+      </Link>
     </div>
   );
 }
@@ -296,6 +354,13 @@ function ConnectorCard({
   onChangeZoomToken,
   onToggleZoomForm,
   connectZoomMut,
+  githubFormOpen,
+  githubToken,
+  githubRepositories,
+  onChangeGitHubToken,
+  onChangeGitHubRepositories,
+  onToggleGitHubForm,
+  connectGitHubMut,
   syncMut,
   disconnectMut,
   onActionError,
@@ -335,6 +400,7 @@ function ConnectorCard({
   const isSlack = type === "slack";
   const isNotion = type === "notion";
   const isZoom = type === "zoom";
+  const isGitHub = type === "github";
   const canConnect = !isDemo && !oauthPending && availability === "available" && status === "disconnected" && !!workspaceId;
   const canReconnect =
     !isDemo &&
@@ -424,6 +490,32 @@ function ConnectorCard({
             status === "disconnected"
               ? "Zoom manual token saved. Run a sync to start storing meeting transcripts."
               : "Zoom manual token updated. Run another sync to refresh meeting transcripts.",
+          );
+        },
+      },
+    );
+  };
+
+  const handleGitHubConnect = (event) => {
+    event.preventDefault();
+    onActionError(null);
+    onActionNotice(null);
+    const repositories = githubRepositories
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    connectGitHubMut.mutate(
+      { token: githubToken, repositories },
+      {
+        onError: (err) => onActionError(formatActionError(err) || "Failed to connect GitHub."),
+        onSuccess: () => {
+          onChangeGitHubToken("");
+          onChangeGitHubRepositories("");
+          onToggleGitHubForm();
+          onActionNotice(
+            status === "disconnected"
+              ? "GitHub token saved. Run a sync to ingest issues, pull requests, and reviews."
+              : "GitHub token updated. Run another sync to refresh engineering context.",
           );
         },
       },
@@ -616,6 +708,7 @@ function ConnectorCard({
             oauthPending={oauthPending}
           />
         )}
+        {isGitHub && <GitHubCapabilityPanel repositories={connector.repositories ?? null} />}
         {scope && (
           <p className="text-[11px] text-gray-400 mt-2">
             Slack scopes: {scope}
@@ -636,6 +729,11 @@ function ConnectorCard({
             Choose OAuth for webhook-driven transcript sync, or save a manual token if polling-only ingestion is enough for now.
           </p>
         )}
+        {isGitHub && status === "disconnected" && availability === "available" && (
+          <p className="text-[11px] text-gray-500 mt-2">
+            Save a GitHub token plus one or more repositories to ingest issues, pull requests, reviews, and comment threads.
+          </p>
+        )}
         {isSlack && status === "error" && (
           <p className="text-[11px] text-red-600 mt-2">
             Slack needs attention. Reconnect the workspace or retry sync after checking OAuth and connector health.
@@ -649,6 +747,11 @@ function ConnectorCard({
         {isZoom && status === "error" && (
           <p className="text-[11px] text-red-600 mt-2">
             Zoom needs attention. Reconnect OAuth or update the manual token, then run another sync.
+          </p>
+        )}
+        {isGitHub && status === "error" && (
+          <p className="text-[11px] text-red-600 mt-2">
+            GitHub needs attention. Update the token or repository list, then run another sync.
           </p>
         )}
         {status === "connected" && teamName && (
@@ -681,6 +784,11 @@ function ConnectorCard({
             {authMode === "oauth"
               ? "Zoom OAuth is connected. Webhook-driven sync is ready for supported recording events, or you can run a sync now."
               : "Zoom is connected in manual polling mode. Run a sync to store meeting transcripts and surface them in Sources and Query."}
+          </p>
+        )}
+        {isGitHub && status === "connected" && itemsSynced === 0 && !syncQueuedAt && (
+          <p className="text-[11px] text-gray-500 mt-2">
+            GitHub is connected. Run a sync to store issues, pull requests, review threads, and linked engineering discussion.
           </p>
         )}
         {status === "coming_soon" && (
@@ -762,6 +870,60 @@ function ConnectorCard({
         </form>
       )}
 
+      {isGitHub && githubFormOpen && (
+        <form onSubmit={handleGitHubConnect} className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+          <div>
+            <label htmlFor="github-token" className="block text-xs font-medium text-gray-600 mb-1">
+              GitHub access token
+            </label>
+            <input
+              id="github-token"
+              type="password"
+              value={githubToken}
+              onChange={(event) => onChangeGitHubToken(event.target.value)}
+              placeholder="ghp_xxx"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+          </div>
+          <div>
+            <label htmlFor="github-repositories" className="block text-xs font-medium text-gray-600 mb-1">
+              Repositories
+            </label>
+            <textarea
+              id="github-repositories"
+              value={githubRepositories}
+              onChange={(event) => onChangeGitHubRepositories(event.target.value)}
+              placeholder={"acme/context-engine\nacme/platform"}
+              rows={3}
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            <p className="mt-1 text-[11px] text-gray-500">
+              One `owner/repo` per line or comma separated.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={
+                connectGitHubMut.isPending ||
+                !githubToken.trim() ||
+                !githubRepositories.trim()
+              }
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {connectGitHubMut.isPending ? "Saving..." : "Save GitHub token"}
+            </button>
+            <button
+              type="button"
+              onClick={onToggleGitHubForm}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
       <div className="flex flex-wrap gap-2 mt-auto">
         {status === "coming_soon" ? (
           <button
@@ -828,6 +990,24 @@ function ConnectorCard({
             className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
           >
             Update Zoom token
+          </button>
+        ) : isGitHub && status === "disconnected" ? (
+          <button
+            type="button"
+            disabled={isDemo || !workspaceId}
+            onClick={onToggleGitHubForm}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            Connect GitHub
+          </button>
+        ) : isGitHub && (status === "connected" || status === "error") ? (
+          <button
+            type="button"
+            disabled={isDemo}
+            onClick={onToggleGitHubForm}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+          >
+            Update GitHub token
           </button>
         ) : (
           <button
@@ -990,6 +1170,30 @@ function ZoomCapabilityPanel({
         >
           {ctaLabel}
         </a>
+      )}
+    </div>
+  );
+}
+
+function GitHubCapabilityPanel({ repositories }) {
+  const repoList = Array.isArray(repositories) ? repositories : [];
+  return (
+    <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+      <p className="text-[11px] uppercase tracking-wide text-gray-500">GitHub scope</p>
+      <p className="mt-2 text-[11px] text-gray-700">
+        Polling-first engineering context from issues, pull requests, reviews, and comments.
+      </p>
+      {repoList.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {repoList.map((repo) => (
+            <span
+              key={repo}
+              className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-gray-700 border border-gray-200"
+            >
+              {repo}
+            </span>
+          ))}
+        </div>
       )}
     </div>
   );

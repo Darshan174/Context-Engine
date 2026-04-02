@@ -83,6 +83,28 @@ export default function Query() {
         Query your workspace context. Live backend answers are preferred; demo answers only appear when the backend is unreachable.
       </p>
 
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Self-host query flow</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Query works best after raw sources are synced, extracted facts are reviewed, and benchmark cases clear the current accuracy gate.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <a href="/app/sources" className="font-medium text-brand-700 hover:text-brand-800">
+              Inspect sources
+            </a>
+            <a href="/app/review" className="font-medium text-brand-700 hover:text-brand-800">
+              Review trust
+            </a>
+            <a href="/app/accuracy" className="font-medium text-brand-700 hover:text-brand-800">
+              Benchmark accuracy
+            </a>
+          </div>
+        </div>
+      </div>
+
       {/* ── Input ───────────────────────────────── */}
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="flex gap-3">
@@ -208,6 +230,17 @@ export default function Query() {
                 and try again.
               </p>
             )}
+            <p className="text-xs text-amber-700">
+              Then inspect{" "}
+              <a href="/app/sources" className="underline underline-offset-2">
+                Sources
+              </a>{" "}
+              and{" "}
+              <a href="/app/review" className="underline underline-offset-2">
+                Review
+              </a>{" "}
+              to see whether the problem is missing raw context or unresolved trust state.
+            </p>
           </div>
         </div>
       )}
@@ -360,9 +393,12 @@ export default function Query() {
 
       {/* ── Empty / hint ────────────────────────── */}
       {!result && !mutation.isPending && !mutation.isError && (
-        <div className="text-center py-12 text-gray-400 space-y-2">
+        <div className="text-center py-12 text-gray-400 space-y-4">
           <SearchIcon />
           <p className="text-sm">Ask a question to query your knowledge graph.</p>
+          <p className="text-xs text-gray-500 max-w-2xl mx-auto">
+            For a self-hosted install, the fastest path is sync real sources first, review conflicts, then use query to pressure-test the current trust graph.
+          </p>
           <div className="flex flex-wrap justify-center gap-2 pt-2">
             {["What is our current MRR?", "How healthy are our customers?"].map((q) => (
               <button
@@ -382,6 +418,17 @@ export default function Query() {
                 {q}
               </button>
             ))}
+          </div>
+          <div className="flex flex-wrap justify-center gap-4 text-xs">
+            <a href="/app/connectors" className="font-medium text-brand-700 hover:text-brand-800">
+              Connect sources
+            </a>
+            <a href="/app/review" className="font-medium text-brand-700 hover:text-brand-800">
+              Review trust issues
+            </a>
+            <a href="/app/accuracy" className="font-medium text-brand-700 hover:text-brand-800">
+              Benchmark accuracy
+            </a>
           </div>
         </div>
       )}

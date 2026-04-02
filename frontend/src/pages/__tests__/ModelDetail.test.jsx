@@ -117,9 +117,33 @@ describe("ModelDetail", () => {
     useModel.mockReturnValue({ isLoading: false, isError: false, data: backendModel, refetch: vi.fn() });
     renderDetail();
     expect(screen.getByText("Revenue Model")).toBeInTheDocument();
+    expect(screen.getByText("Trust path for this model")).toBeInTheDocument();
     expect(screen.getByText("MRR")).toBeInTheDocument();
     expect(screen.getByText("$2.4M")).toBeInTheDocument();
     expect(screen.getByText("Churn Rate")).toBeInTheDocument();
+  });
+
+  it("shows onboarding guidance when a model has no components", () => {
+    useModel.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        id: "model-2",
+        name: "Pricing Model",
+        description: "Tracks pricing",
+        workspace_id: "ws-1",
+        updated_at: "2024-01-01T00:00:00Z",
+        components: [],
+      },
+      refetch: vi.fn(),
+    });
+
+    renderDetail("model-2");
+
+    expect(screen.getByText("No components yet.")).toBeInTheDocument();
+    expect(screen.getByText(/usually appear after source documents are synced and extracted/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a component" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Inspect sources" })).toHaveAttribute("href", "/app/sources");
   });
 
   it("renders source-backed evidence links when component provenance exists", () => {

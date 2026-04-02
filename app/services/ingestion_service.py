@@ -41,6 +41,7 @@ class IngestionService:
         ConnectorType.NOTION: 0.95,
         ConnectorType.ZOOM: 0.90,
         ConnectorType.GONG: 0.90,
+        ConnectorType.GITHUB: 0.86,
         ConnectorType.GDRIVE: 0.88,
         ConnectorType.SLACK: 0.75,
     }
@@ -48,6 +49,7 @@ class IngestionService:
         ConnectorType.SLACK: ("Slack Insights", "Auto-generated from Slack connector sync"),
         ConnectorType.NOTION: ("Notion Insights", "Auto-generated from Notion connector sync"),
         ConnectorType.ZOOM: ("Zoom Insights", "Auto-generated from Zoom connector sync"),
+        ConnectorType.GITHUB: ("GitHub Insights", "Auto-generated from GitHub connector sync"),
     }
     _FALLBACK_MODEL = ("Connector Insights", "Auto-generated from connector sync")
 

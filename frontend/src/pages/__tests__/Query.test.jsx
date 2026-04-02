@@ -37,8 +37,12 @@ describe("Query — empty state", () => {
     renderQuery();
 
     expect(screen.getByText("Ask a question to query your knowledge graph.")).toBeInTheDocument();
+    expect(screen.getByText("Self-host query flow")).toBeInTheDocument();
     expect(screen.getByText("What is our current MRR?")).toBeInTheDocument();
     expect(screen.getByText("How healthy are our customers?")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect sources" })).toHaveAttribute("href", "/app/connectors");
+    expect(screen.getByRole("link", { name: "Review trust issues" })).toHaveAttribute("href", "/app/review");
+    expect(screen.getByRole("link", { name: "Inspect sources" })).toHaveAttribute("href", "/app/sources");
   });
 
   it("has Ask button disabled when input is blank", () => {

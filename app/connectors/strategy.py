@@ -46,6 +46,16 @@ CONNECTOR_STRATEGIES: dict[ConnectorType, ConnectorStrategy] = {
         provider_label="Official API",
         note="Transcript-first meeting source via the Zoom recordings API. Keeps ingestion focused on high-signal meeting transcripts, not media processing.",
     ),
+    ConnectorType.GITHUB: ConnectorStrategy(
+        connector_type=ConnectorType.GITHUB,
+        provider=ConnectorProvider.OFFICIAL_API,
+        provider_label="Official API",
+        note=(
+            "Polling-first GitHub issue, pull-request, review, and comment ingestion via "
+            "the REST API. Keeps scope narrow around high-signal engineering context "
+            "instead of broad repository mirroring."
+        ),
+    ),
     ConnectorType.GDRIVE: ConnectorStrategy(
         connector_type=ConnectorType.GDRIVE,
         provider=ConnectorProvider.UNSTRUCTURED,
