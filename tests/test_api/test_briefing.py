@@ -177,8 +177,8 @@ class TestDecisionRegisterApi:
         await db_session.flush()
         db_session.add(
             Relationship(
-                source_component_id=blocker.id,
-                target_component_id=current.id,
+                source_component_id=current.id,
+                target_component_id=blocker.id,
                 relationship_type=RelationshipType.BLOCKED_BY,
                 confidence=0.9,
                 description="Launch decision is blocked by legal sign-off.",
@@ -203,6 +203,136 @@ class TestDecisionRegisterApi:
         assert body[0]["related_blocker"] == "Need legal sign-off before launch."
         assert body[0]["decision_history"][0]["new_status"] == "approved"
         assert body[0]["rationale_sources"][0]["label"] == "weekly-product-review"
+
+    async def test_workflow_views_hide_rejected_and_superseded_current_decisions(
+        self, client, workspace, db_session
+    ):
+        connector = await _seed_connector(db_session, workspace)
+        model = await _seed_model(db_session, workspace)
+
+        doc = await _seed_source_document(
+            db_session,
+            connector,
+            external_id="slack:visibility",
+            content="decision: use Auth0",
+            metadata={"channel_name": "auth"},
+        )
+
+        approved = Component(
+            model_id=model.id,
+            name="Auth Provider Decision",
+            value="Use Auth0.",
+            confidence=0.93,
+            authority_weight=0.9,
+            valid_from=datetime.now(timezone.utc) - timedelta(hours=3),
+            last_verified_at=datetime.now(timezone.utc),
+        )
+        rejected = Component(
+            model_id=model.id,
+            name="Auth Provider Decision",
+            value="Use Okta.",
+            confidence=0.8,
+            authority_weight=0.75,
+            valid_from=datetime.now(timezone.utc) - timedelta(hours=2),
+            last_verified_at=datetime.now(timezone.utc),
+        )
+        superseded = Component(
+            model_id=model.id,
+            name="Auth Provider Decision",
+            value="Use Clerk.",
+            confidence=0.79,
+            authority_weight=0.74,
+            valid_from=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_verified_at=datetime.now(timezone.utc),
+        )
+        blocker = Component(
+            model_id=model.id,
+            name="Blocker in Auth",
+            value="Security review still pending.",
+            confidence=0.85,
+            authority_weight=0.9,
+            valid_from=datetime.now(timezone.utc) - timedelta(minutes=45),
+            last_verified_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([approved, rejected, superseded, blocker])
+        await db_session.flush()
+
+        for component in (approved, rejected, superseded, blocker):
+            await _link_component_source(db_session, component, doc, extracted_value=component.value)
+
+        db_session.add_all(
+            [
+                ReviewItem(
+                    component_id=approved.id,
+                    status="approved",
+                    severity="low",
+                    kind="fact_update",
+                    title="Approved auth decision",
+                    summary="Auth0 is the approved provider.",
+                    confidence=0.93,
+                ),
+                ReviewItem(
+                    component_id=rejected.id,
+                    status="rejected",
+                    severity="medium",
+                    kind="conflict",
+                    title="Rejected auth alternative",
+                    summary="Okta was rejected.",
+                    confidence=0.8,
+                ),
+                ReviewItem(
+                    component_id=superseded.id,
+                    status="superseded",
+                    severity="low",
+                    kind="superseded_fact",
+                    title="Superseded auth alternative",
+                    summary="Clerk was superseded.",
+                    confidence=0.79,
+                ),
+            ]
+        )
+        await db_session.flush()
+        db_session.add(
+            Relationship(
+                source_component_id=approved.id,
+                target_component_id=blocker.id,
+                relationship_type=RelationshipType.BLOCKED_BY,
+                confidence=0.9,
+                description="Approved auth decision is blocked by security review.",
+            )
+        )
+        await db_session.commit()
+
+        decisions_resp = await client.get(
+            "/api/decisions",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert decisions_resp.status_code == 200
+        decisions = decisions_resp.json()
+        assert [item["value"] for item in decisions] == ["Use Auth0."]
+        assert decisions[0]["related_blocker"] == "Security review still pending."
+
+        founder_resp = await client.get(
+            "/api/founder-brief",
+            params={"workspace_id": str(workspace.id), "lookback_days": 7},
+        )
+        assert founder_resp.status_code == 200
+        changed_values = {item["value"] for item in founder_resp.json()["changed_facts"]}
+        assert "Use Auth0." in changed_values
+        assert "Use Okta." not in changed_values
+        assert "Use Clerk." not in changed_values
+
+        timeline_resp = await client.get(
+            "/api/timeline",
+            params={"workspace_id": str(workspace.id), "limit": 20},
+        )
+        assert timeline_resp.status_code == 200
+        decision_events = [
+            item for item in timeline_resp.json()["items"]
+            if item["event_type"] == "decision_change"
+        ]
+        assert [item["summary"] for item in decision_events] == ["Use Auth0."]
+        assert decision_events[0]["payload"]["related_blocker"] == "Security review still pending."
 
     async def test_decision_history_returns_current_and_superseded_versions(
         self, client, workspace, db_session
@@ -333,6 +463,95 @@ class TestDecisionRegisterApi:
         assert second_body["has_more"] is False
         assert [entry["value"] for entry in second_body["entries"]] == ["Use Auth0."]
 
+    async def test_decision_history_ignores_newer_hidden_current_versions(
+        self, client, workspace, db_session
+    ):
+        connector = await _seed_connector(db_session, workspace)
+        model = await _seed_model(db_session, workspace)
+
+        current_doc = await _seed_source_document(
+            db_session,
+            connector,
+            external_id="slack:decision:current-visible",
+            content="decision: use Auth0",
+            metadata={"channel_name": "product"},
+        )
+        hidden_doc = await _seed_source_document(
+            db_session,
+            connector,
+            external_id="slack:decision:current-hidden",
+            content="decision: use Okta",
+            metadata={"channel_name": "product"},
+        )
+
+        approved_current = Component(
+            model_id=model.id,
+            name="Auth Provider Decision",
+            value="Use Auth0.",
+            confidence=0.92,
+            authority_weight=0.9,
+            valid_from=datetime.now(timezone.utc) - timedelta(hours=2),
+            last_verified_at=datetime.now(timezone.utc),
+        )
+        rejected_current = Component(
+            model_id=model.id,
+            name="Auth Provider Decision",
+            value="Use Okta.",
+            confidence=0.8,
+            authority_weight=0.75,
+            valid_from=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_verified_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([approved_current, rejected_current])
+        await db_session.flush()
+
+        await _link_component_source(
+            db_session,
+            approved_current,
+            current_doc,
+            extracted_value="Use Auth0.",
+        )
+        await _link_component_source(
+            db_session,
+            rejected_current,
+            hidden_doc,
+            extracted_value="Use Okta.",
+        )
+
+        db_session.add_all(
+            [
+                ReviewItem(
+                    component_id=approved_current.id,
+                    status="approved",
+                    severity="low",
+                    kind="fact_update",
+                    title="Approved auth provider",
+                    summary="Auth0 is current.",
+                    confidence=0.92,
+                ),
+                ReviewItem(
+                    component_id=rejected_current.id,
+                    status="rejected",
+                    severity="medium",
+                    kind="conflict",
+                    title="Rejected auth provider",
+                    summary="Okta was rejected.",
+                    confidence=0.8,
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/decisions/{approved_current.id}/history",
+            params={"workspace_id": str(workspace.id)},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["current_decision_id"] == str(approved_current.id)
+        assert [entry["value"] for entry in body["entries"]] == ["Use Auth0."]
+
 
 class TestFounderBriefApi:
     async def test_founder_brief_summarizes_changed_facts_conflicts_risks_and_failures(
@@ -426,6 +645,82 @@ class TestFounderBriefApi:
         assert body["open_conflicts"][0]["title"] == "Pricing conflict"
         assert any(item["reason"] for item in body["stale_high_risk_items"])
         assert body["recent_connector_failures"][0]["error_type"] == "AuthenticationError"
+
+    async def test_founder_brief_hides_historical_conflicts(
+        self, client, workspace, db_session
+    ):
+        connector = await _seed_connector(db_session, workspace)
+        model = await _seed_model(db_session, workspace, name="Ops")
+        source_doc = await _seed_source_document(
+            db_session,
+            connector,
+            external_id="slack:ops:conflict",
+            content="decision: launch next Tuesday",
+            metadata={"channel_name": "ops"},
+        )
+
+        current = Component(
+            model_id=model.id,
+            name="Launch Decision",
+            value="Launch next Tuesday.",
+            confidence=0.9,
+            authority_weight=0.8,
+            valid_from=datetime.now(timezone.utc) - timedelta(hours=2),
+            last_verified_at=datetime.now(timezone.utc),
+        )
+        historical = Component(
+            model_id=model.id,
+            name="Launch Decision",
+            value="Launch this Friday.",
+            confidence=0.7,
+            authority_weight=0.7,
+            valid_from=datetime.now(timezone.utc) - timedelta(days=3),
+            valid_to=datetime.now(timezone.utc) - timedelta(days=1),
+            last_verified_at=datetime.now(timezone.utc) - timedelta(days=1),
+            is_stale=True,
+        )
+        db_session.add_all([current, historical])
+        await db_session.flush()
+        await _link_component_source(db_session, current, source_doc, extracted_value=current.value)
+        await _link_component_source(
+            db_session,
+            historical,
+            source_doc,
+            extracted_value=historical.value,
+        )
+
+        db_session.add_all(
+            [
+                ReviewItem(
+                    component_id=current.id,
+                    status="needs_review",
+                    severity="high",
+                    kind="conflict",
+                    title="Current launch conflict",
+                    summary="Current launch date is disputed.",
+                    confidence=0.9,
+                ),
+                ReviewItem(
+                    component_id=historical.id,
+                    status="needs_review",
+                    severity="high",
+                    kind="conflict",
+                    title="Historical launch conflict",
+                    summary="Historical launch date was disputed.",
+                    confidence=0.7,
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        response = await client.get(
+            "/api/founder-brief",
+            params={"workspace_id": str(workspace.id), "lookback_days": 7},
+        )
+
+        assert response.status_code == 200
+        conflicts = response.json()["open_conflicts"]
+        assert [item["title"] for item in conflicts] == ["Current launch conflict"]
 
 
 class TestTimelineApi:

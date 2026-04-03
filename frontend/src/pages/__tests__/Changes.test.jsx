@@ -23,9 +23,14 @@ beforeEach(() => {
     isLoading: false,
     isError: false,
     isMock: false,
+    hasMore: false,
+    fetchNextPage: vi.fn(),
+    isFetchingNextPage: false,
     data: {
       generatedAt: "2026-04-02T10:00:00Z",
       totalEvents: 4,
+      hasMore: false,
+      nextCursor: null,
       items: [
         {
           id: "decision-1",
@@ -80,7 +85,10 @@ describe("Changes", () => {
       isLoading: true,
       isError: false,
       isMock: false,
-      data: { generatedAt: null, totalEvents: 0, items: [] },
+      hasMore: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+      data: { generatedAt: null, totalEvents: 0, hasMore: false, nextCursor: null, items: [] },
       refetch: vi.fn(),
     });
 
@@ -94,7 +102,10 @@ describe("Changes", () => {
       isLoading: false,
       isError: false,
       isMock: false,
-      data: { generatedAt: "2026-04-02T10:00:00Z", totalEvents: 0, items: [] },
+      hasMore: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+      data: { generatedAt: "2026-04-02T10:00:00Z", totalEvents: 0, hasMore: false, nextCursor: null, items: [] },
       refetch: vi.fn(),
     });
 
@@ -126,5 +137,41 @@ describe("Changes", () => {
     expect(screen.getByText("Launch the pricing page next Tuesday")).toBeInTheDocument();
     expect(screen.queryByText("Pricing conflict")).not.toBeInTheDocument();
     expect(screen.queryByText("Zoom connector")).not.toBeInTheDocument();
+  });
+
+  it("shows a load more button when the backend has more timeline pages", async () => {
+    const fetchNextPage = vi.fn();
+    useTimeline.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      isMock: false,
+      hasMore: true,
+      fetchNextPage,
+      isFetchingNextPage: false,
+      data: {
+        generatedAt: "2026-04-02T10:00:00Z",
+        totalEvents: 4,
+        hasMore: true,
+        nextCursor: "cursor-2",
+        items: [
+          {
+            id: "decision-1",
+            type: "decision",
+            occurredAt: "2026-03-31T10:00:00Z",
+            title: "Launch the pricing page next Tuesday",
+            summary: "Decision captured in the product review meeting.",
+            status: "current",
+            sourceDocumentId: "sd10",
+          },
+        ],
+      },
+      refetch: vi.fn(),
+    });
+
+    renderChanges();
+
+    await userEvent.click(screen.getByRole("button", { name: "Load more changes" }));
+
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
   });
 });

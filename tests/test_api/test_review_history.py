@@ -7,6 +7,7 @@ operator actions and ingestion pipeline transitions.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -70,7 +71,10 @@ class TestOperatorDecisionHistory:
 
     async def test_approve_records_decision(self, client, workspace, db_session):
         g = await _make_review_graph(db_session, workspace)
-        resp = await client.post(f"/api/review-items/{g['review'].id}/approve")
+        resp = await client.post(
+            f"/api/review-items/{g['review'].id}/approve",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
 
         decisions = list(await db_session.scalars(
@@ -86,7 +90,10 @@ class TestOperatorDecisionHistory:
 
     async def test_reject_records_decision(self, client, workspace, db_session):
         g = await _make_review_graph(db_session, workspace)
-        resp = await client.post(f"/api/review-items/{g['review'].id}/reject")
+        resp = await client.post(
+            f"/api/review-items/{g['review'].id}/reject",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
 
         decisions = list(await db_session.scalars(
@@ -102,7 +109,10 @@ class TestOperatorDecisionHistory:
 
     async def test_supersede_records_decision(self, client, workspace, db_session):
         g = await _make_review_graph(db_session, workspace)
-        resp = await client.post(f"/api/review-items/{g['review'].id}/supersede")
+        resp = await client.post(
+            f"/api/review-items/{g['review'].id}/supersede",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
 
         decisions = list(await db_session.scalars(
@@ -121,7 +131,10 @@ class TestOperatorDecisionHistory:
         """Two operator actions create two decision records."""
         g = await _make_review_graph(db_session, workspace)
 
-        resp1 = await client.post(f"/api/review-items/{g['review'].id}/approve")
+        resp1 = await client.post(
+            f"/api/review-items/{g['review'].id}/approve",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp1.status_code == 200
 
         # Re-fetch and force back to needs_review to test a second transition
@@ -129,7 +142,10 @@ class TestOperatorDecisionHistory:
         g["review"].status = "needs_review"
         await db_session.flush()
 
-        resp2 = await client.post(f"/api/review-items/{g['review'].id}/reject")
+        resp2 = await client.post(
+            f"/api/review-items/{g['review'].id}/reject",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp2.status_code == 200
 
         decisions = list(await db_session.scalars(
@@ -148,7 +164,10 @@ class TestOperatorDecisionHistory:
         """The GET review item response includes decision_history."""
         g = await _make_review_graph(db_session, workspace)
 
-        await client.post(f"/api/review-items/{g['review'].id}/approve")
+        await client.post(
+            f"/api/review-items/{g['review'].id}/approve",
+            params={"workspace_id": str(workspace.id)},
+        )
 
         resp = await client.get(
             "/api/review-items",
@@ -160,6 +179,23 @@ class TestOperatorDecisionHistory:
         item = next(i for i in items if i["id"] == str(g["review"].id))
         assert len(item["decision_history"]) >= 1
         assert item["decision_history"][0]["actor_type"] == "operator"
+
+    async def test_workspace_scope_is_required_for_operator_mutations(
+        self, client, workspace, db_session
+    ):
+        g = await _make_review_graph(db_session, workspace)
+        resp = await client.post(f"/api/review-items/{g['review'].id}/approve")
+        assert resp.status_code == 422
+
+    async def test_operator_mutation_wrong_workspace_returns_404(
+        self, client, workspace, db_session
+    ):
+        g = await _make_review_graph(db_session, workspace)
+        resp = await client.post(
+            f"/api/review-items/{g['review'].id}/approve",
+            params={"workspace_id": str(uuid4())},
+        )
+        assert resp.status_code == 404
 
 
 class TestIngestionPipelineDecisionHistory:

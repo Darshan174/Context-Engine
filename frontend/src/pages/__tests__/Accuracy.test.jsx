@@ -1,13 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Accuracy from "../Accuracy";
 
 vi.mock("../../api/hooks", () => ({
   useEvalCases: vi.fn(),
   useEvalSummary: vi.fn(),
+  useRunEvals: vi.fn(),
 }));
 
-import { useEvalCases, useEvalSummary } from "../../api/hooks";
+import { useEvalCases, useEvalSummary, useRunEvals } from "../../api/hooks";
+
+let mutateRunEvals;
 
 function renderAccuracy({ initialEntries = ["/app/accuracy"] } = {}) {
   return render(
@@ -19,6 +22,7 @@ function renderAccuracy({ initialEntries = ["/app/accuracy"] } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mutateRunEvals = vi.fn();
   useEvalCases.mockReturnValue({
     isLoading: false,
     isError: false,
@@ -40,6 +44,13 @@ beforeEach(() => {
       ],
     },
     refetch: vi.fn(),
+  });
+  useRunEvals.mockReturnValue({
+    mutate: mutateRunEvals,
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    error: null,
   });
 });
 
@@ -71,6 +82,7 @@ describe("Accuracy", () => {
     expect(screen.getByText("Accuracy data is not ready yet for this workspace.")).toBeInTheDocument();
     expect(screen.getByText(/python scripts\/run_eval_regression.py --workspace-id/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open sources" })).toHaveAttribute("href", "/app/sources");
+    expect(screen.getByRole("button", { name: "Run evals now" })).toBeInTheDocument();
   });
 
   it("renders live accuracy summary, domains, metrics, and blockers", () => {
@@ -117,6 +129,8 @@ describe("Accuracy", () => {
       "href",
       "/app/review",
     );
+    expect(screen.getByRole("button", { name: "Run pricing evals" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run all evals" })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Try benchmark query" })[0]).toHaveAttribute(
       "href",
       "/app/query?question=What+is+our+current+enterprise+pricing%3F&window=30",
@@ -201,5 +215,67 @@ describe("Accuracy", () => {
       "href",
       "/app/query?question=What+did+we+decide+in+the+latest+product+review+meeting%3F&window=30",
     );
+  });
+
+  it("runs evals for the selected domain from the accuracy header", () => {
+    useEvalSummary.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      isMock: false,
+      data: {
+        passRate: 0.72,
+        passedCases: 18,
+        totalCases: 25,
+        threshold: 0.7,
+        latestRunAt: "2026-04-01T09:30:00Z",
+        domains: [
+          { domain: "pricing", passRate: 0.8, passed: 4, total: 5 },
+        ],
+        metrics: [],
+        blockers: [],
+      },
+      refetch: vi.fn(),
+    });
+
+    renderAccuracy({ initialEntries: ["/app/accuracy?domain=pricing"] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Run pricing evals" }));
+
+    expect(mutateRunEvals).toHaveBeenCalledWith({
+      domains: ["pricing"],
+      passThreshold: 0.7,
+    });
+  });
+
+  it("shows eval run errors without breaking the page", () => {
+    useEvalSummary.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      isMock: false,
+      data: {
+        passRate: 0.72,
+        passedCases: 18,
+        totalCases: 25,
+        threshold: 0.7,
+        latestRunAt: "2026-04-01T09:30:00Z",
+        domains: [
+          { domain: "pricing", passRate: 0.8, passed: 4, total: 5 },
+        ],
+        metrics: [],
+        blockers: [],
+      },
+      refetch: vi.fn(),
+    });
+    useRunEvals.mockReturnValue({
+      mutate: mutateRunEvals,
+      isPending: false,
+      isError: true,
+      isSuccess: false,
+      error: { detail: "Eval runs are restricted to local/admin access" },
+    });
+
+    renderAccuracy({ initialEntries: ["/app/accuracy?domain=pricing"] });
+
+    expect(screen.getByText("Eval runs are restricted to local/admin access")).toBeInTheDocument();
   });
 });

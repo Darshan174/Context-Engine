@@ -100,8 +100,33 @@ class TrustService:
             raise TrustResourceNotFoundError("Review item not found")
         return item
 
-    async def approve_review_item(self, review_item_id: UUID) -> ReviewItem:
-        item = await self.get_review_item(review_item_id)
+    async def get_review_item_for_workspace(
+        self,
+        review_item_id: UUID,
+        workspace_id: UUID,
+    ) -> ReviewItem:
+        await self._require_workspace(workspace_id)
+        item = await self.session.scalar(
+            select(ReviewItem)
+            .join(Component, ReviewItem.component_id == Component.id)
+            .join(KnowledgeModel, Component.model_id == KnowledgeModel.id)
+            .where(
+                ReviewItem.id == review_item_id,
+                KnowledgeModel.workspace_id == workspace_id,
+            )
+            .options(
+                selectinload(ReviewItem.component).selectinload(Component.model),
+                selectinload(ReviewItem.component).selectinload(Component.source_documents),
+                selectinload(ReviewItem.decision_history),
+            )
+            .execution_options(populate_existing=True)
+        )
+        if item is None:
+            raise TrustResourceNotFoundError("Review item not found")
+        return item
+
+    async def approve_review_item(self, review_item_id: UUID, workspace_id: UUID) -> ReviewItem:
+        item = await self.get_review_item_for_workspace(review_item_id, workspace_id)
         previous_status = item.status
         item.status = "approved"
         component = item.component
@@ -116,10 +141,10 @@ class TrustService:
             note="Review item approved via operator API.",
         )
         await self.session.commit()
-        return await self.get_review_item(review_item_id)
+        return await self.get_review_item_for_workspace(review_item_id, workspace_id)
 
-    async def reject_review_item(self, review_item_id: UUID) -> ReviewItem:
-        item = await self.get_review_item(review_item_id)
+    async def reject_review_item(self, review_item_id: UUID, workspace_id: UUID) -> ReviewItem:
+        item = await self.get_review_item_for_workspace(review_item_id, workspace_id)
         previous_status = item.status
         item.status = "rejected"
         component = item.component
@@ -133,10 +158,10 @@ class TrustService:
             note="Review item rejected via operator API.",
         )
         await self.session.commit()
-        return await self.get_review_item(review_item_id)
+        return await self.get_review_item_for_workspace(review_item_id, workspace_id)
 
-    async def supersede_review_item(self, review_item_id: UUID) -> ReviewItem:
-        item = await self.get_review_item(review_item_id)
+    async def supersede_review_item(self, review_item_id: UUID, workspace_id: UUID) -> ReviewItem:
+        item = await self.get_review_item_for_workspace(review_item_id, workspace_id)
         previous_status = item.status
         item.status = "superseded"
         component = item.component
@@ -152,7 +177,7 @@ class TrustService:
             note="Review item superseded via operator API.",
         )
         await self.session.commit()
-        return await self.get_review_item(review_item_id)
+        return await self.get_review_item_for_workspace(review_item_id, workspace_id)
 
     async def list_component_sources(
         self,

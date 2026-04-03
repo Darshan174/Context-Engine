@@ -20,6 +20,10 @@ from app.schemas.decision import (
     DecisionRationaleSourceRead,
     DecisionRead,
 )
+from app.services.truth_visibility import (
+    is_component_visible_in_current_truth,
+    is_component_visible_in_history,
+)
 
 
 class DecisionServiceError(Exception):
@@ -56,9 +60,18 @@ class DecisionService:
                 Component.valid_to.is_not(None).asc(),
                 Component.valid_from.desc(),
                 Component.id.desc(),
-            ).limit(limit)
+            )
         )
-        return [self._serialize_decision(component) for component in rows]
+        visible = [
+            component
+            for component in rows
+            if (
+                is_component_visible_in_history(component)
+                if include_historical
+                else is_component_visible_in_current_truth(component)
+            )
+        ]
+        return [self._serialize_decision(component) for component in visible[:limit]]
 
     async def get_decision_history(
         self,
@@ -72,68 +85,48 @@ class DecisionService:
         target = await self.session.scalar(
             self._decision_stmt(workspace_id).where(Component.id == component_id)
         )
-        if target is None:
+        if target is None or not is_component_visible_in_history(target):
             raise DecisionNotFoundError("Decision not found")
 
         lineage_stmt = self._decision_stmt(workspace_id).where(
             Component.model_id == target.model_id,
             func.lower(Component.name) == target.name.lower(),
         )
-        total_versions = int(
-            await self.session.scalar(
-                select(func.count())
-                .select_from(Component)
-                .join(KnowledgeModel, Component.model_id == KnowledgeModel.id)
-                .where(
-                    KnowledgeModel.workspace_id == workspace_id,
-                    Component.model_id == target.model_id,
-                    func.lower(Component.name) == target.name.lower(),
-                    func.lower(Component.name).like("%decision%"),
-                )
-            )
-            or 0
-        )
-        current = await self.session.scalar(
-            self._decision_stmt(workspace_id)
-            .where(
-                Component.model_id == target.model_id,
-                func.lower(Component.name) == target.name.lower(),
-                Component.valid_to.is_(None),
-            )
-            .order_by(Component.valid_from.desc(), Component.id.desc())
-        )
-
-        if cursor:
-            try:
-                cursor_id = UUID(cursor)
-                cursor_row = (
-                    await self.session.execute(
-                        select(Component.valid_from, Component.id).where(
-                            Component.id == cursor_id,
-                            Component.model_id == target.model_id,
-                            func.lower(Component.name) == target.name.lower(),
-                        )
-                    )
-                ).one_or_none()
-                if cursor_row is not None:
-                    cursor_ts, cursor_uid = cursor_row
-                    from sqlalchemy import tuple_
-
-                    lineage_stmt = lineage_stmt.where(
-                        tuple_(Component.valid_from, Component.id)
-                        < tuple_(cursor_ts, cursor_uid)
-                    )
-            except ValueError:
-                pass
-
-        entries = list(
+        lineage_components = list(
             await self.session.scalars(
                 lineage_stmt.order_by(
                     Component.valid_from.desc(),
                     Component.id.desc(),
-                ).limit(limit + 1)
+                )
             )
         )
+        visible_lineage = [
+            component
+            for component in lineage_components
+            if is_component_visible_in_history(component)
+        ]
+        current = next(
+            (
+                component
+                for component in visible_lineage
+                if component.valid_to is None
+                and is_component_visible_in_current_truth(component)
+            ),
+            None,
+        )
+
+        entries = visible_lineage
+        if cursor:
+            try:
+                cursor_id = UUID(cursor)
+                start_index = next(
+                    index + 1
+                    for index, component in enumerate(entries)
+                    if component.id == cursor_id
+                )
+                entries = entries[start_index:]
+            except (StopIteration, ValueError):
+                pass
         has_more = len(entries) > limit
         paged_entries = entries[:limit]
         next_cursor = str(paged_entries[-1].id) if has_more and paged_entries else None
@@ -141,7 +134,7 @@ class DecisionService:
             workspace_id=workspace_id,
             decision_name=target.name,
             current_decision_id=current.id if current is not None else None,
-            total_versions=total_versions,
+            total_versions=len(visible_lineage),
             has_more=has_more,
             next_cursor=next_cursor,
             entries=[self._serialize_decision(component) for component in paged_entries],
@@ -155,9 +148,12 @@ class DecisionService:
                 selectinload(Component.model),
                 selectinload(Component.review_item).selectinload(ReviewItem.decision_history),
                 selectinload(Component.source_links).selectinload(ComponentSource.source_document),
+                selectinload(Component.outgoing_relationships)
+                .selectinload(Relationship.target_component)
+                .selectinload(Component.review_item),
                 selectinload(Component.incoming_relationships).selectinload(
                     Relationship.source_component
-                ),
+                ).selectinload(Component.review_item),
             )
             .where(
                 KnowledgeModel.workspace_id == workspace_id,
@@ -191,7 +187,11 @@ class DecisionService:
                 extractor_schema_version=link.extractor_schema_version,
             )
             for link in sorted(
-                component.source_links,
+                [
+                    link
+                    for link in component.source_links
+                    if link.source_document is not None
+                ],
                 key=lambda item: (
                     item.source_document.created_at_source or item.source_document.ingested_at
                 ),
@@ -229,15 +229,34 @@ class DecisionService:
     @staticmethod
     def _related_blocker(component: Component) -> str | None:
         blockers: list[str] = []
+        for relationship in component.outgoing_relationships:
+            if relationship.valid_to is not None:
+                continue
+            if relationship.relationship_type != RelationshipType.BLOCKED_BY:
+                continue
+            target_component = relationship.target_component
+            if not DecisionService._is_visible_blocker(target_component):
+                continue
+            blockers.append(target_component.value)
+
+        if blockers:
+            return blockers[0]
+
         for relationship in component.incoming_relationships:
             if relationship.valid_to is not None:
                 continue
             if relationship.relationship_type != RelationshipType.BLOCKED_BY:
                 continue
             source_component = relationship.source_component
-            if source_component is None or source_component.valid_to is not None:
-                continue
-            if not source_component.name.lower().startswith("blocker"):
+            if not DecisionService._is_visible_blocker(source_component):
                 continue
             blockers.append(source_component.value)
         return blockers[0] if blockers else None
+
+    @staticmethod
+    def _is_visible_blocker(component: Component | None) -> bool:
+        if component is None:
+            return False
+        if not component.name.lower().startswith("blocker"):
+            return False
+        return is_component_visible_in_current_truth(component)

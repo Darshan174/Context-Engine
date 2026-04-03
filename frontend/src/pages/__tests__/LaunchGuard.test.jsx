@@ -139,6 +139,16 @@ describe("LaunchGuard", () => {
     expect(screen.getByText(/Current trusted pricing differs from the claim/i)).toBeInTheDocument();
     expect(screen.getByText("Grounding evidence")).toBeInTheDocument();
     expect(screen.getByText("Enterprise Seat Price")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "View source" })[0]).toHaveAttribute(
+      "href",
+      "/app/sources/sd1",
+    );
+    expect(screen.getAllByRole("link", { name: "Inspect fact" })[0]).toHaveAttribute(
+      "href",
+      "/app/models",
+    );
+    expect(screen.getAllByRole("link", { name: "View source" }).length).toBeGreaterThan(1);
+    expect(screen.getAllByRole("link", { name: "Inspect fact" }).length).toBeGreaterThan(1);
     expect(screen.getByRole("link", { name: "Open timeline" })).toHaveAttribute(
       "href",
       "/app/changes",

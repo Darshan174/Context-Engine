@@ -244,6 +244,20 @@ function analyzeDraft(draft, context) {
   const evidence = [];
 
   decisions.forEach((item) => {
+    const decisionLinks = dedupeLinks([
+      item.sourceDocumentId
+        ? { to: `/app/sources/${item.sourceDocumentId}`, label: "View source" }
+        : null,
+      item.reviewItemIds?.[0]
+        ? { to: `/app/review/${item.reviewItemIds[0]}`, label: "Open review thread" }
+        : null,
+      item.connectorType === "zoom"
+        ? { to: "/app/meetings", label: "Open meetings" }
+        : item.connectorType === "github"
+          ? { to: "/app/engineering", label: "Open engineering" }
+          : { to: "/app/decisions", label: "Open decisions" },
+    ]);
+
     evidence.push({
       id: `decision-${item.id}`,
       title: item.title,
@@ -251,6 +265,7 @@ function analyzeDraft(draft, context) {
       status: item.status,
       to: `/app/sources/${item.sourceDocumentId}`,
       toLabel: "View source",
+      links: decisionLinks,
     });
 
     if (item.status === "needs_review") {
@@ -261,6 +276,15 @@ function analyzeDraft(draft, context) {
         detail: "The draft relies on a decision that has not cleared the review queue yet.",
         to: item.reviewItemIds?.[0] ? `/app/review/${item.reviewItemIds[0]}` : "/app/review",
         toLabel: "Open review thread",
+        links: dedupeLinks([
+          item.reviewItemIds?.[0]
+            ? { to: `/app/review/${item.reviewItemIds[0]}`, label: "Open review thread" }
+            : { to: "/app/review", label: "Open review queue" },
+          item.sourceDocumentId
+            ? { to: `/app/sources/${item.sourceDocumentId}`, label: "View source" }
+            : null,
+          { to: "/app/decisions", label: "Open decisions" },
+        ]),
       });
     } else if (item.status === "historical") {
       findings.push({
@@ -270,11 +294,26 @@ function analyzeDraft(draft, context) {
         detail: "This looks like superseded or historical context, not current operating truth.",
         to: `/app/decisions?state=historical`,
         toLabel: "Review historical decisions",
+        links: dedupeLinks([
+          { to: `/app/decisions?state=historical`, label: "Review historical decisions" },
+          item.sourceDocumentId
+            ? { to: `/app/sources/${item.sourceDocumentId}`, label: "View source" }
+            : null,
+        ]),
       });
     }
   });
 
   components.forEach((item) => {
+    const sourceLink = item.sourceDocuments?.[0]
+      ? { to: `/app/sources/${item.sourceDocuments[0].id}`, label: "View source" }
+      : null;
+    const componentLinks = dedupeLinks([
+      item.modelId ? { to: `/app/model/${item.modelId}`, label: "Open model" } : null,
+      item.reviewItemId ? { to: `/app/review/${item.reviewItemId}`, label: "Open review thread" } : null,
+      sourceLink,
+    ]);
+
     evidence.push({
       id: `component-${item.id}`,
       title: item.name,
@@ -282,6 +321,7 @@ function analyzeDraft(draft, context) {
       status: item.reviewStatus ?? item.temporalState ?? null,
       to: item.modelId ? `/app/model/${item.modelId}` : "/app/models",
       toLabel: "Open model",
+      links: componentLinks,
     });
 
     if (item.reviewStatus === "needs_review") {
@@ -292,6 +332,13 @@ function analyzeDraft(draft, context) {
         detail: item.reviewSummary || "The draft relies on a fact that still needs a human trust decision.",
         to: item.reviewItemId ? `/app/review/${item.reviewItemId}` : "/app/review",
         toLabel: "Open review queue",
+        links: dedupeLinks([
+          item.reviewItemId
+            ? { to: `/app/review/${item.reviewItemId}`, label: "Open review thread" }
+            : { to: "/app/review", label: "Open review queue" },
+          item.modelId ? { to: `/app/model/${item.modelId}`, label: "Inspect fact" } : null,
+          sourceLink,
+        ]),
       });
     } else if (
       item.temporalState === "historical" ||
@@ -305,6 +352,11 @@ function analyzeDraft(draft, context) {
         detail: "The draft appears to rely on superseded context rather than the current fact version.",
         to: item.modelId ? `/app/model/${item.modelId}` : "/app/models",
         toLabel: "Inspect fact history",
+        links: dedupeLinks([
+          item.modelId ? { to: `/app/model/${item.modelId}`, label: "Inspect fact history" } : null,
+          sourceLink,
+          { to: "/app/changes", label: "Open timeline" },
+        ]),
       });
     } else if (typeof item.confidence === "number" && item.confidence < 0.75) {
       findings.push({
@@ -314,6 +366,11 @@ function analyzeDraft(draft, context) {
         detail: "The draft depends on context that still has a weak extraction confidence signal.",
         to: item.modelId ? `/app/model/${item.modelId}` : "/app/models",
         toLabel: "Inspect fact",
+        links: dedupeLinks([
+          item.modelId ? { to: `/app/model/${item.modelId}`, label: "Inspect fact" } : null,
+          item.reviewItemId ? { to: `/app/review/${item.reviewItemId}`, label: "Open review thread" } : null,
+          sourceLink,
+        ]),
       });
     }
   });
@@ -327,6 +384,10 @@ function analyzeDraft(draft, context) {
       detail: item.summary || "The draft overlaps with an unresolved review item.",
       to: `/app/review/${item.id}`,
       toLabel: "Open review thread",
+      links: dedupeLinks([
+        { to: `/app/review/${item.id}`, label: "Open review thread" },
+        { to: "/app/review?status=needs_review", label: "Open review queue" },
+      ]),
     });
   });
 
@@ -341,6 +402,11 @@ function analyzeDraft(draft, context) {
       detail: "The context engine could not find a close match in current decisions or structured facts. The draft may be ahead of the data or missing source support.",
       to: "/app/sources",
       toLabel: "Inspect sources",
+      links: dedupeLinks([
+        { to: "/app/sources", label: "Inspect sources" },
+        { to: "/app/query", label: "Try a query" },
+        { to: "/app/connectors", label: "Check connectors" },
+      ]),
     });
   }
 
@@ -381,6 +447,14 @@ function normalizeLaunchGuardApiReport(data) {
         status: claim.status ?? null,
         to: item.source_document_id ? `/app/sources/${item.source_document_id}` : "/app/sources",
         toLabel: "View source",
+        links: dedupeLinks([
+          item.source_document_id
+            ? { to: `/app/sources/${item.source_document_id}`, label: "View source" }
+            : { to: "/app/sources", label: "Inspect sources" },
+          claim.matched_component_id != null
+            ? { to: "/app/models", label: "Inspect fact" }
+            : null,
+        ]),
       })),
     ),
   );
@@ -406,6 +480,18 @@ function normalizeLaunchGuardApiReport(data) {
               : "/app/sources",
           toLabel:
             claim.matched_component_id != null ? "Inspect fact" : "Inspect sources",
+          links: dedupeLinks([
+            claim.matched_component_id != null
+              ? { to: "/app/models", label: "Inspect fact" }
+              : { to: "/app/sources", label: "Inspect sources" },
+            ...((claim.evidence ?? [])
+              .map((item) =>
+                item.source_document_id
+                  ? { to: `/app/sources/${item.source_document_id}`, label: "View source" }
+                  : null,
+              )
+              .filter(Boolean)),
+          ]),
         },
       ];
     }),
@@ -578,11 +664,24 @@ function FindingCard({ item }) {
   return (
     <div className={`rounded-lg border px-4 py-3 ${styles[item.severity] ?? styles.low}`}>
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-medium">{item.title}</p>
           <p className="mt-1 text-sm opacity-90">{item.detail}</p>
+          {resolveCardLinks(item).length > 1 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {resolveCardLinks(item).map((link) => (
+                <Link
+                  key={`${item.id}-${link.to}-${link.label}`}
+                  to={link.to}
+                  className="rounded-full border border-current/20 px-2.5 py-1 text-[11px] font-medium hover:bg-white/40"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
-        <Link to={item.to} className="text-xs font-medium underline underline-offset-2">
+        <Link to={item.to} className="shrink-0 text-xs font-medium underline underline-offset-2">
           {item.toLabel}
         </Link>
       </div>
@@ -594,7 +693,7 @@ function EvidenceCard({ item }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium text-gray-800">{item.title}</p>
             {item.status && (
@@ -604,13 +703,47 @@ function EvidenceCard({ item }) {
             )}
           </div>
           <p className="mt-1 text-sm text-gray-600">{item.summary}</p>
+          {resolveCardLinks(item).length > 1 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {resolveCardLinks(item).map((link) => (
+                <Link
+                  key={`${item.id}-${link.to}-${link.label}`}
+                  to={link.to}
+                  className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:border-brand-200 hover:text-brand-700"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
-        <Link to={item.to} className="text-xs font-medium text-brand-700 hover:text-brand-800">
+        <Link to={item.to} className="shrink-0 text-xs font-medium text-brand-700 hover:text-brand-800">
           {item.toLabel}
         </Link>
       </div>
     </div>
   );
+}
+
+function resolveCardLinks(item) {
+  if (Array.isArray(item.links) && item.links.length > 0) {
+    return dedupeLinks(item.links);
+  }
+  if (item.to && item.toLabel) {
+    return [{ to: item.to, label: item.toLabel }];
+  }
+  return [];
+}
+
+function dedupeLinks(items) {
+  const seen = new Set();
+  return (items ?? []).filter((item) => {
+    if (!item?.to || !item?.label) return false;
+    const key = `${item.to}::${item.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function LaunchGuardEmptyState() {

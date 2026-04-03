@@ -54,6 +54,7 @@ export default function Changes() {
   const usesMockData = timelineQuery.isMock;
   const generatedAt = timelineQuery.data?.generatedAt ?? null;
   const totalEvents = timelineQuery.data?.totalEvents ?? changes.length;
+  const showLoadMore = !timelineQuery.isMock && timelineQuery.hasMore;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -123,6 +124,18 @@ export default function Changes() {
           {filteredChanges.map((item) => (
             <ChangeCard key={item.id} item={item} />
           ))}
+          {showLoadMore && (
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <button
+                type="button"
+                onClick={() => timelineQuery.fetchNextPage()}
+                disabled={timelineQuery.isFetchingNextPage}
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+              >
+                {timelineQuery.isFetchingNextPage ? "Loading more..." : "Load more changes"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

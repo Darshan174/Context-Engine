@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.models import (
     Component,
     ComponentSource,
@@ -393,6 +395,64 @@ class TestQueryAPI:
         assert body["components"][0]["name"] == "SSO Integration"
         assert "blocked by Analytics Dashboard" in body["answer"]
         assert "engineering bandwidth" in body["answer"]
+
+    @pytest.mark.parametrize("hidden_status", ["rejected", "superseded"])
+    async def test_query_hides_hidden_related_components_from_relationship_context(
+        self, client, db_session, workspace, hidden_status
+    ):
+        features = await _create_model(db_session, workspace.id, "Features", "Feature work")
+        sso = await _create_component(
+            db_session,
+            model_id=features.id,
+            name="SSO Integration",
+            value="Deprioritized due to engineering bandwidth",
+            confidence=0.9,
+            last_verified_at=datetime.now(UTC) - timedelta(days=2),
+        )
+        analytics = await _create_component(
+            db_session,
+            model_id=features.id,
+            name="Analytics Dashboard",
+            value="In development, Q3 target",
+            confidence=0.85,
+            last_verified_at=datetime.now(UTC) - timedelta(days=1),
+        )
+        db_session.add(
+            ReviewItem(
+                component_id=analytics.id,
+                status=hidden_status,
+                severity="medium",
+                kind="conflict",
+                title=f"{hidden_status.title()} analytics blocker",
+                summary="Analytics should not appear in current-truth answers.",
+                confidence=0.85,
+            )
+        )
+        await db_session.flush()
+        await _create_relationship(
+            db_session,
+            source_component_id=sso.id,
+            target_component_id=analytics.id,
+            relationship_type=RelationshipType.BLOCKED_BY,
+            sentiment=RelationshipSentiment.NEGATIVE,
+            confidence=0.92,
+            description="Analytics Dashboard work is consuming the same engineering bandwidth.",
+        )
+
+        resp = await client.post(
+            "/api/query",
+            json={
+                "question": "Why is SSO Integration delayed?",
+                "workspace_id": str(workspace.id),
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["components"]
+        assert body["components"][0]["name"] == "SSO Integration"
+        assert "Analytics Dashboard" not in body["answer"]
+        assert "blocked by" not in body["answer"]
 
     async def test_query_deduplicates_identical_component_facts(
         self, client, db_session, workspace

@@ -102,7 +102,9 @@ def build_default_embedder() -> BaseEmbedder:
 
 
 def cosine_similarity(lhs: list[float] | None, rhs: list[float] | None) -> float:
-    if not lhs or not rhs:
+    if lhs is None or rhs is None:
+        return 0.0
+    if len(lhs) == 0 or len(rhs) == 0:
         return 0.0
     return float(sum(a * b for a, b in zip(lhs, rhs)))
 

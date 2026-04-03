@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.connector import Connector
 from app.models.job import SyncJob, SyncJobStatus
-from app.models.knowledge import Component, KnowledgeModel
+from app.models.knowledge import Component, KnowledgeModel, Relationship
 from app.models.review import ReviewDecision, ReviewItem
 from app.models.source import ConnectorType, SourceDocument
 from app.models.user import Workspace
@@ -30,7 +30,12 @@ from app.schemas.briefing import (
     TimelineEventRead,
     TimelineRead,
 )
+from app.services.decision_service import DecisionService
 from app.services.query_service import QueryService
+from app.services.truth_visibility import (
+    is_component_visible_in_current_truth,
+    is_component_visible_in_history,
+)
 
 _STOPWORDS = {
     "a",
@@ -101,8 +106,9 @@ class BriefingService:
             if component.valid_from >= since and self._is_blocker(component)
         ][:10]
 
-        conflict_items = list(
-            await self.session.scalars(
+        conflict_items = [
+            item
+            for item in await self.session.scalars(
                 select(ReviewItem)
                 .join(Component, ReviewItem.component_id == Component.id)
                 .join(KnowledgeModel, Component.model_id == KnowledgeModel.id)
@@ -114,7 +120,9 @@ class BriefingService:
                 )
                 .order_by(ReviewItem.updated_at.desc(), ReviewItem.created_at.desc())
             )
-        )
+            if item.component is not None
+            and is_component_visible_in_current_truth(item.component)
+        ]
 
         stale_high_risk_items: list[FounderBriefRiskRead] = []
         for component in current_components:
@@ -276,7 +284,14 @@ class BriefingService:
                 .join(KnowledgeModel, Component.model_id == KnowledgeModel.id)
                 .options(
                     selectinload(Component.model),
+                    selectinload(Component.review_item),
                     selectinload(Component.source_documents),
+                    selectinload(Component.outgoing_relationships)
+                    .selectinload(Relationship.target_component)
+                    .selectinload(Component.review_item),
+                    selectinload(Component.incoming_relationships)
+                    .selectinload(Relationship.source_component)
+                    .selectinload(Component.review_item),
                 )
                 .where(
                     KnowledgeModel.workspace_id == workspace_id,
@@ -286,6 +301,8 @@ class BriefingService:
             )
         )
         for component in decision_components:
+            if not is_component_visible_in_current_truth(component):
+                continue
             primary_source = self._primary_source_document(component)
             events.append(
                 TimelineEventRead(
@@ -306,6 +323,7 @@ class BriefingService:
                         "authority_weight": component.authority_weight,
                         "review_status": component.review_status,
                         "is_current": component.valid_to is None,
+                        "related_blocker": DecisionService._related_blocker(component),
                         "source_document_id": str(primary_source.id)
                         if primary_source is not None
                         else None,
@@ -479,7 +497,18 @@ class BriefingService:
         if current_only:
             stmt = stmt.where(Component.valid_to.is_(None))
         rows = await self.session.scalars(stmt)
-        return list(rows)
+        components = list(rows)
+        if current_only:
+            return [
+                component
+                for component in components
+                if is_component_visible_in_current_truth(component)
+            ]
+        return [
+            component
+            for component in components
+            if is_component_visible_in_history(component)
+        ]
 
     @staticmethod
     def _serialize_fact(component: Component) -> FounderBriefFactRead:

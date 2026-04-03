@@ -18,10 +18,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "CREATE TYPE sync_job_status_enum AS ENUM "
-        "('pending', 'running', 'completed', 'failed')"
+    sync_job_status_enum = postgresql.ENUM(
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        name="sync_job_status_enum",
+        create_type=True,
     )
+    sync_job_status_enum.create(op.get_bind(), checkfirst=True)
+
     op.create_table(
         "sync_jobs",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -33,8 +39,11 @@ def upgrade() -> None:
         ),
         sa.Column(
             "status",
-            sa.Enum(
-                "pending", "running", "completed", "failed",
+            postgresql.ENUM(
+                "pending",
+                "running",
+                "completed",
+                "failed",
                 name="sync_job_status_enum",
                 create_type=False,
             ),
@@ -50,7 +59,7 @@ def upgrade() -> None:
             "result_metadata",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="'{}'::jsonb",
+            server_default=sa.text("'{}'::jsonb"),
         ),
         sa.Column(
             "created_at",
@@ -63,6 +72,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    sync_job_status_enum = postgresql.ENUM(
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        name="sync_job_status_enum",
+        create_type=True,
+    )
     op.drop_index("ix_sync_jobs_connector_id", table_name="sync_jobs")
     op.drop_table("sync_jobs")
-    op.execute("DROP TYPE sync_job_status_enum")
+    sync_job_status_enum.drop(op.get_bind(), checkfirst=True)

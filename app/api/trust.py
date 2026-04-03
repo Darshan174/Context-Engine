@@ -113,10 +113,16 @@ async def list_review_items(
 @router.post("/review-items/{review_item_id}/approve", response_model=ReviewItemRead)
 async def approve_review_item(
     review_item_id: UUID,
+    workspace_id: UUID,
     service: TrustService = Depends(get_trust_service),
 ) -> ReviewItemRead:
     try:
-        item = await service.approve_review_item(review_item_id)
+        item = await service.approve_review_item(review_item_id, workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
     except TrustResourceNotFoundError:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -128,10 +134,16 @@ async def approve_review_item(
 @router.post("/review-items/{review_item_id}/reject", response_model=ReviewItemRead)
 async def reject_review_item(
     review_item_id: UUID,
+    workspace_id: UUID,
     service: TrustService = Depends(get_trust_service),
 ) -> ReviewItemRead:
     try:
-        item = await service.reject_review_item(review_item_id)
+        item = await service.reject_review_item(review_item_id, workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
     except TrustResourceNotFoundError:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -143,10 +155,16 @@ async def reject_review_item(
 @router.post("/review-items/{review_item_id}/supersede", response_model=ReviewItemRead)
 async def supersede_review_item(
     review_item_id: UUID,
+    workspace_id: UUID,
     service: TrustService = Depends(get_trust_service),
 ) -> ReviewItemRead:
     try:
-        item = await service.supersede_review_item(review_item_id)
+        item = await service.supersede_review_item(review_item_id, workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
     except TrustResourceNotFoundError:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,

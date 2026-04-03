@@ -176,7 +176,10 @@ class TestReviewItems:
         seeded["component"].is_stale = True
         await db_session.flush()
 
-        resp = await client.post(f"/api/review-items/{seeded['review_item'].id}/approve")
+        resp = await client.post(
+            f"/api/review-items/{seeded['review_item'].id}/approve",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "approved"
@@ -193,7 +196,10 @@ class TestReviewItems:
     async def test_reject_review_item(self, client, workspace, db_session):
         seeded = await _seed_component_graph(db_session, workspace)
 
-        resp = await client.post(f"/api/review-items/{seeded['review_item'].id}/reject")
+        resp = await client.post(
+            f"/api/review-items/{seeded['review_item'].id}/reject",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "rejected"
@@ -208,7 +214,10 @@ class TestReviewItems:
     async def test_supersede_review_item(self, client, workspace, db_session):
         seeded = await _seed_component_graph(db_session, workspace)
 
-        resp = await client.post(f"/api/review-items/{seeded['review_item'].id}/supersede")
+        resp = await client.post(
+            f"/api/review-items/{seeded['review_item'].id}/supersede",
+            params={"workspace_id": str(workspace.id)},
+        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "superseded"
@@ -219,6 +228,28 @@ class TestReviewItems:
         await db_session.refresh(seeded["component"])
         assert seeded["review_item"].status == "superseded"
         assert seeded["component"].valid_to is not None
+
+    async def test_review_mutation_wrong_workspace_returns_404(
+        self, client, workspace, db_session
+    ):
+        seeded = await _seed_component_graph(db_session, workspace)
+        other_workspace = Workspace(id=uuid4(), name="Other Workspace")
+        db_session.add(other_workspace)
+        await db_session.flush()
+
+        resp = await client.post(
+            f"/api/review-items/{seeded['review_item'].id}/approve",
+            params={"workspace_id": str(other_workspace.id)},
+        )
+        assert resp.status_code == 404
+
+    async def test_review_mutation_missing_workspace_returns_422(
+        self, client, workspace, db_session
+    ):
+        seeded = await _seed_component_graph(db_session, workspace)
+
+        resp = await client.post(f"/api/review-items/{seeded['review_item'].id}/approve")
+        assert resp.status_code == 422
 
 
 class TestProvenanceEndpoints:

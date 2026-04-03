@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from app.processing.embedder import (
     EmbeddingError,
     HashingEmbedder,
     LiteLLMEmbedder,
+    cosine_similarity,
     build_default_embedder,
 )
 
@@ -21,6 +23,12 @@ class TestHashingEmbedder:
         assert vector1 == vector2
         assert len(vector1) == 8
         assert pytest.approx(math.sqrt(sum(value * value for value in vector1)), 0.0001) == 1.0
+
+
+class TestCosineSimilarity:
+    def test_accepts_numpy_arrays(self):
+        similarity = cosine_similarity([0.1, 0.2, 0.3], np.array([0.4, 0.5, 0.6]))
+        assert similarity == pytest.approx(0.32)
 
 
 class TestLiteLLMEmbedder:

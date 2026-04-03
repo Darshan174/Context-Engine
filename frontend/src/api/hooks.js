@@ -612,6 +612,44 @@ export function useEvalCases(domain, { enabled = true } = {}) {
   };
 }
 
+export function useRunEvals() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ domains, caseIds, passThreshold } = {}) => {
+      const wsId = await getWorkspaceId();
+      if (!wsId) {
+        throw new Error("No workspace available for eval run");
+      }
+
+      const payload = { workspace_id: wsId };
+      if (Array.isArray(domains) && domains.length > 0) {
+        payload.domains = domains;
+      }
+      if (Array.isArray(caseIds) && caseIds.length > 0) {
+        payload.case_ids = caseIds;
+      }
+      if (passThreshold != null) {
+        payload.pass_threshold = passThreshold;
+      }
+
+      const data = await api.post("/evals/run", payload);
+      return normalizeEvalCases(data);
+    },
+    onSuccess: async (_data, variables) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["eval-summary"] }),
+        qc.invalidateQueries({ queryKey: ["eval-cases"] }),
+        qc.invalidateQueries({ queryKey: ["dashboard"] }),
+      ]);
+
+      if (Array.isArray(variables?.domains) && variables.domains.length === 1) {
+        await qc.invalidateQueries({ queryKey: ["eval-cases", variables.domains[0]] });
+      }
+    },
+  });
+}
+
 // ── Workflow views ───────────────────────────────────────────
 
 export function useFounderBrief(lookbackDays = 7) {
@@ -646,13 +684,21 @@ export function useFounderBrief(lookbackDays = 7) {
 }
 
 export function useTimeline(limit = 50) {
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: ["timeline", limit],
-    queryFn: async () => {
+    initialPageParam: null,
+    queryFn: async ({ pageParam }) => {
       const wsId = await getWorkspaceId();
       if (!wsId) {
         return {
-          timeline: { workspaceId: null, generatedAt: null, totalEvents: 0, items: [] },
+          timeline: {
+            workspaceId: null,
+            generatedAt: null,
+            totalEvents: 0,
+            hasMore: false,
+            nextCursor: null,
+            items: [],
+          },
           isMock: false,
         };
       }
@@ -661,6 +707,7 @@ export function useTimeline(limit = 50) {
         workspace_id: wsId,
         limit: String(limit),
       });
+      if (pageParam) params.set("cursor", pageParam);
 
       try {
         const data = await api.get(`/timeline?${params.toString()}`);
@@ -669,15 +716,49 @@ export function useTimeline(limit = 50) {
         if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (pageParam) {
+          return {
+            timeline: {
+              workspaceId: wsId,
+              generatedAt: null,
+              totalEvents: 0,
+              hasMore: false,
+              nextCursor: null,
+              items: [],
+            },
+            isMock: true,
+          };
+        }
         return { timeline: buildMockTimeline(limit), isMock: true };
       }
     },
+    getNextPageParam: (lastPage) =>
+      lastPage.timeline?.hasMore ? lastPage.timeline.nextCursor : undefined,
   });
+
+  const pages = query.data?.pages ?? [];
+  const firstPage = pages[0]?.timeline ?? {
+    workspaceId: null,
+    generatedAt: null,
+    totalEvents: 0,
+    hasMore: false,
+    nextCursor: null,
+    items: [],
+  };
+  const data = {
+    workspaceId: firstPage.workspaceId,
+    generatedAt: firstPage.generatedAt,
+    totalEvents: firstPage.totalEvents ?? 0,
+    hasMore: query.hasNextPage ?? false,
+    nextCursor: pages.at(-1)?.timeline?.nextCursor ?? null,
+    items: pages.flatMap((page) => page.timeline?.items ?? []),
+  };
 
   return {
     ...query,
-    data: query.data?.timeline ?? { workspaceId: null, generatedAt: null, totalEvents: 0, items: [] },
-    isMock: query.data?.isMock ?? false,
+    data,
+    hasMore: query.hasNextPage ?? false,
+    isMock: firstPage.items.length > 0 ? (pages[0]?.isMock ?? false) : false,
   };
 }
 
@@ -992,7 +1073,10 @@ export function useDisconnectConnector() {
 export function useApproveReviewItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (reviewItemId) => api.post(`/review-items/${reviewItemId}/approve`, {}),
+    mutationFn: async (reviewItemId) => {
+      const wsId = await getWorkspaceId();
+      return api.post(`/review-items/${reviewItemId}/approve?workspace_id=${wsId}`, {});
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["review-queue"] });
       qc.invalidateQueries({ queryKey: ["source-document-review-items"] });
@@ -1006,7 +1090,10 @@ export function useApproveReviewItem() {
 export function useRejectReviewItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (reviewItemId) => api.post(`/review-items/${reviewItemId}/reject`, {}),
+    mutationFn: async (reviewItemId) => {
+      const wsId = await getWorkspaceId();
+      return api.post(`/review-items/${reviewItemId}/reject?workspace_id=${wsId}`, {});
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["review-queue"] });
       qc.invalidateQueries({ queryKey: ["source-document-review-items"] });
@@ -1020,7 +1107,10 @@ export function useRejectReviewItem() {
 export function useSupersedeReviewItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (reviewItemId) => api.post(`/review-items/${reviewItemId}/supersede`, {}),
+    mutationFn: async (reviewItemId) => {
+      const wsId = await getWorkspaceId();
+      return api.post(`/review-items/${reviewItemId}/supersede?workspace_id=${wsId}`, {});
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["review-queue"] });
       qc.invalidateQueries({ queryKey: ["source-document-review-items"] });
@@ -1727,7 +1817,14 @@ function normalizeFounderBriefFailures(data) {
 
 function normalizeTimelinePayload(data) {
   if (!data || typeof data !== "object") {
-    return { workspaceId: null, generatedAt: null, totalEvents: 0, items: [] };
+    return {
+      workspaceId: null,
+      generatedAt: null,
+      totalEvents: 0,
+      hasMore: false,
+      nextCursor: null,
+      items: [],
+    };
   }
 
   const items = Array.isArray(data.items)
@@ -1738,6 +1835,8 @@ function normalizeTimelinePayload(data) {
     workspaceId: data.workspaceId ?? data.workspace_id ?? null,
     generatedAt: data.generatedAt ?? data.generated_at ?? null,
     totalEvents: toNumber(data.totalEvents ?? data.total_events ?? items.length),
+    hasMore: Boolean(data.hasMore ?? data.has_more ?? false),
+    nextCursor: data.nextCursor ?? data.next_cursor ?? null,
     items,
   };
 }
@@ -1976,6 +2075,8 @@ function buildMockTimeline(limit = 50) {
     workspaceId: "mock-workspace",
     generatedAt: new Date().toISOString(),
     totalEvents: items.length,
+    hasMore: false,
+    nextCursor: null,
     items,
   };
 }

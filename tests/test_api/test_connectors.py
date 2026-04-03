@@ -1193,6 +1193,50 @@ class TestGetSourceDocument:
         assert body["content"] == "Page content here"
         assert body["connector_type"] == "notion"
 
+    async def test_get_existing_github_engineering_document(
+        self, client, workspace, db_session
+    ):
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.GITHUB,
+            status=ConnectorStatus.CONNECTED,
+            config={"repositories": ["acme/context-engine"]},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        doc = SourceDocument(
+            connector_id=conn.id,
+            connector_type=ConnectorType.GITHUB,
+            external_id="github:acme/context-engine:pull_request:77",
+            content="Decision: use the new rollout path.",
+            author="octocat",
+            source_url="https://github.com/acme/context-engine/pull/77",
+            ingested_at=datetime.now(timezone.utc),
+            metadata_json={
+                "repo_full_name": "acme/context-engine",
+                "title": "Rollout path",
+                "item_type": "pull_request",
+                "number": 77,
+                "pull_request_references": ["acme/context-engine#13"],
+                "issue_references": ["acme/context-engine#31"],
+                "commit_references": ["abc1234"],
+            },
+        )
+        db_session.add(doc)
+        await db_session.flush()
+
+        resp = await client.get(
+            f"/api/source-documents/{doc.id}",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["connector_type"] == "github"
+        assert body["metadata"]["repo_full_name"] == "acme/context-engine"
+        assert body["metadata"]["item_type"] == "pull_request"
+        assert body["metadata"]["issue_references"] == ["acme/context-engine#31"]
+
     async def test_get_deleted_document_returns_404(
         self, client, workspace, db_session
     ):

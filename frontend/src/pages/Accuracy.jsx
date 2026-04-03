@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useEvalCases, useEvalSummary } from "../api/hooks";
+import { useEvalCases, useEvalSummary, useRunEvals } from "../api/hooks";
 import MockBadge from "../components/MockBadge";
 import StatusView from "../components/StatusView";
 
@@ -33,6 +33,9 @@ export default function Accuracy() {
   const summary = query.data;
   const selectedDomain = searchParams.get("domain") ?? "";
   const casesQuery = useEvalCases(selectedDomain, { enabled: !!selectedDomain });
+  const runMutation = useRunEvals();
+  const selectedDomainSummary =
+    (summary?.domains ?? []).find((domain) => domain.domain === selectedDomain) ?? null;
 
   useEffect(() => {
     if (!summary?.domains?.length || selectedDomain) return;
@@ -61,7 +64,7 @@ export default function Accuracy() {
   if (!summary) {
     return (
       <div className="max-w-6xl mx-auto">
-        <AccuracyEmptyState />
+        <AccuracyEmptyState runMutation={runMutation} />
       </div>
     );
   }
@@ -70,10 +73,6 @@ export default function Accuracy() {
     summary.passRate != null &&
     summary.threshold != null &&
     summary.passRate >= summary.threshold;
-  const selectedDomainSummary = useMemo(
-    () => (summary.domains ?? []).find((domain) => domain.domain === selectedDomain) ?? null,
-    [selectedDomain, summary.domains],
-  );
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -99,6 +98,51 @@ export default function Accuracy() {
           Open review queue
         </Link>
       </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        {selectedDomainSummary && (
+          <button
+            type="button"
+            onClick={() =>
+              runMutation.mutate({
+                domains: [selectedDomainSummary.domain],
+                passThreshold: summary.threshold ?? undefined,
+              })
+            }
+            disabled={runMutation.isPending}
+            className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {runMutation.isPending ? "Running evals..." : `Run ${selectedDomainSummary.domain} evals`}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            runMutation.mutate({
+              passThreshold: summary.threshold ?? undefined,
+            })
+          }
+          disabled={runMutation.isPending}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {runMutation.isPending ? "Running evals..." : "Run all evals"}
+        </button>
+        <p className="text-xs text-gray-500">
+          Uses the backend eval runner when local/admin access is allowed.
+        </p>
+      </div>
+
+      {runMutation.isError && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {formatEvalRunError(runMutation.error)}
+        </div>
+      )}
+
+      {runMutation.isSuccess && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Eval run completed. Summary and case views have been refreshed.
+        </div>
+      )}
 
       <div
         className={`rounded-xl border p-5 ${
@@ -285,7 +329,7 @@ export default function Accuracy() {
   );
 }
 
-function AccuracyEmptyState() {
+function AccuracyEmptyState({ runMutation }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6">
       <div className="flex items-start justify-between gap-4">
@@ -301,6 +345,20 @@ function AccuracyEmptyState() {
         >
           Open sources
         </Link>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => runMutation.mutate({})}
+          disabled={runMutation.isPending}
+          className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {runMutation.isPending ? "Running evals..." : "Run evals now"}
+        </button>
+        <p className="text-xs text-gray-500">
+          This works when the backend eval runner is enabled for your local/admin environment.
+        </p>
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -333,6 +391,18 @@ function AccuracyEmptyState() {
           Open query
         </Link>
       </div>
+
+      {runMutation.isError && (
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {formatEvalRunError(runMutation.error)}
+        </div>
+      )}
+
+      {runMutation.isSuccess && (
+        <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Eval run completed. Refreshing accuracy results.
+        </div>
+      )}
     </div>
   );
 }
@@ -442,6 +512,21 @@ function formatDateTime(value) {
   } catch {
     return value;
   }
+}
+
+function formatEvalRunError(error) {
+  const detail =
+    error?.detail ??
+    error?.message ??
+    "Unable to run evals right now.";
+
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item?.msg ?? String(item)).join(", ");
+  }
+  if (typeof detail === "object" && detail !== null) {
+    return detail.detail ?? JSON.stringify(detail);
+  }
+  return String(detail);
 }
 
 function buildBenchmarkQueryLink(domain) {

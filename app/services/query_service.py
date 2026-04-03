@@ -21,6 +21,10 @@ from app.processing.reranker import (
     RerankCandidate,
     build_default_reranker,
 )
+from app.services.truth_visibility import (
+    is_component_visible_as_of,
+    is_component_visible_in_current_truth,
+)
 from app.schemas.query import (
     FreshnessStatus,
     QueryComponentRead,
@@ -384,19 +388,8 @@ class QueryService:
         filters: QueryFilters,
     ) -> bool:
         if filters.as_of is None:
-            if component.valid_to is not None:
-                return False
-            if component.review_status in {"rejected", "superseded"}:
-                return False
-            return True
-
-        if component.valid_from > filters.as_of:
-            return False
-        if component.valid_to is not None and component.valid_to <= filters.as_of:
-            return False
-        if component.review_status == "rejected":
-            return False
-        return True
+            return is_component_visible_in_current_truth(component)
+        return is_component_visible_as_of(component, as_of=filters.as_of)
 
     def _is_relationship_visible(
         self,
@@ -558,6 +551,12 @@ class QueryService:
                 continue
             other_component = self._other_component(component, relation)
             if other_component is None:
+                continue
+            if not self._is_component_visible(other_component, filters):
+                continue
+            if other_component.confidence < filters.min_confidence:
+                continue
+            if not self._within_age_limit(other_component, filters.max_age_days):
                 continue
 
             relation_tokens = self._tokenize(relation.relationship_type.value.replace("_", " "))

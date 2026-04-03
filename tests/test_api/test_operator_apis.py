@@ -429,6 +429,83 @@ class TestDocumentComponents:
         assert resp.status_code == 200
         assert resp.json()[0]["decision_history"][0]["new_status"] == "approved"
 
+    async def test_returns_components_for_github_engineering_document(
+        self, client, workspace, db_session, monkeypatch
+    ):
+        self._setup(monkeypatch)
+        conn = Connector(
+            workspace_id=workspace.id,
+            connector_type=ConnectorType.GITHUB,
+            status=ConnectorStatus.CONNECTED,
+            config={"repositories": ["acme/context-engine"]},
+        )
+        db_session.add(conn)
+        await db_session.flush()
+
+        doc = SourceDocument(
+            connector_id=conn.id,
+            connector_type=ConnectorType.GITHUB,
+            external_id="github:acme/context-engine:pull_request:77",
+            content="Decision: use the new rollout path.",
+            author="octocat",
+            source_url="https://github.com/acme/context-engine/pull/77",
+            metadata_json={
+                "repo_full_name": "acme/context-engine",
+                "title": "Rollout path",
+                "item_type": "pull_request",
+                "number": 77,
+                "source_type": "github_pull_request",
+            },
+        )
+        db_session.add(doc)
+        await db_session.flush()
+
+        model = _make_knowledge_model(workspace)
+        db_session.add(model)
+        await db_session.flush()
+
+        component = _make_component(
+            model,
+            name="Rollout Decision",
+            value="Use the new rollout path.",
+        )
+        db_session.add(component)
+        await db_session.flush()
+
+        review_item = ReviewItem(
+            component_id=component.id,
+            status="approved",
+            severity="low",
+            kind="fact_update",
+            title="Approved rollout decision",
+            summary="Engineering approved the rollout path.",
+            confidence=0.93,
+        )
+        db_session.add(review_item)
+        await db_session.flush()
+        db_session.add(
+            ReviewDecision(
+                review_item_id=review_item.id,
+                previous_status="needs_review",
+                new_status="approved",
+                actor_type="operator",
+                note="Approved from GitHub source.",
+            )
+        )
+        db_session.add(ComponentSource(component_id=component.id, source_document_id=doc.id))
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/source-documents/{doc.id}/components",
+            params={"workspace_id": str(workspace.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 1
+        assert body[0]["name"] == "Rollout Decision"
+        assert body[0]["review_status"] == "approved"
+        assert body[0]["decision_history"][0]["new_status"] == "approved"
+
     async def test_returns_empty_list_when_no_components(
         self, client, workspace, db_session, monkeypatch
     ):
