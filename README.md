@@ -1,36 +1,123 @@
 # Context Engine
 
-Context Engine is an infrastructure product that ingests unstructured company
-data, organizes it into a structured knowledge graph, and exposes that graph
-through a Context API for downstream AI systems.
+Context Engine is an open-source context layer for startups and AI systems.
 
-## Current Backend Scope
+It ingests company knowledge from chat, docs, meetings, and engineering tools, stores the raw evidence, extracts structured facts and relationships, and serves source-backed answers with review, provenance, and temporal context built in.
 
-This repository currently includes the foundation for:
+## Why This Exists
 
-- FastAPI application bootstrap
-- Async SQLAlchemy database wiring
-- Alembic migration scaffold
-- Docker Compose services for PostgreSQL, Redis, API, and worker
-- Connector-backed ingestion for Slack, Notion, Zoom transcripts, and GitHub issues / pull requests
-- Query, provenance, review, temporal, and eval flows for source-backed answers
+Most internal AI systems fail on the same problem:
 
-## Connector Strategy
+- company knowledge is scattered across Slack, Notion, meeting transcripts, and GitHub
+- the newest answer is often buried in chat while old answers still live in docs
+- vector search alone retrieves similar text, not current truth
+- operators cannot easily see why an answer was given or whether it still needs review
 
-The connector layer is intentionally mixed:
+Context Engine is built to solve that problem with:
 
-- `Slack` stays built in because OAuth, thread expansion, and real-time events are product-critical.
-- `Notion` is planned to use a `dlt` verified source rather than a full hand-built sync.
-- `GitHub` stays narrow and native for now because issues and pull requests are high-signal engineering context without needing a full repo mirror.
-- `Google Drive` is planned to use `Unstructured` for ingestion and document extraction.
-- `Gong` is expected to stay on the official API because transcript semantics matter more than generic ETL.
+- raw source retention
+- structured fact storage
+- provenance for every fact
+- review and conflict handling
+- current-vs-historical truth
+- measurable accuracy
 
-This keeps the product-specific parts in-house while reusing OSS where it actually helps.
+## Who It Is For
+
+- startups that want a source-backed internal context layer
+- founders and operators who need trustworthy answers, not vague retrieval
+- engineering and product teams that want decisions, blockers, and changes made explicit
+- agent builders who want auditable context instead of generic RAG
+
+## What The Product Does
+
+Context Engine takes data from connected systems and turns it into an operator-friendly context graph.
+
+### Sources
+
+Current connector surface includes:
+
+- Slack
+- Notion
+- Zoom transcripts
+- GitHub issues and pull requests
+
+### Core Data Model
+
+The backend stores:
+
+- `source_documents`: raw ingested evidence
+- `components`: extracted facts
+- `relationships`: links between facts
+- `component_sources`: provenance from fact back to source
+- `review_items`: conflicts, low-confidence facts, superseded facts
+- `sync_jobs`: background sync and reprocess tracking
+
+### Product Workflows
+
+The app currently includes:
+
+- **Founder Brief**: summarize what changed, what is risky, and what needs attention
+- **Decision Register**: view current and historical decisions with rationale and blockers
+- **What Changed**: timeline across decision changes, reviews, ingests, and failures
+- **Launch Guard**: check outbound copy against current truth, review state, and evidence
+- **Meetings**: inspect transcript-backed decisions and blockers
+- **Engineering**: inspect GitHub-backed engineering context
+- **Accuracy**: review eval results, domains, cases, and benchmark queries
+- **Review Queue**: resolve conflicts and low-confidence facts
+- **Connectors / Sources / Models / Query / Graph**: operate the underlying system
+
+## Product Principles
+
+Context Engine is intentionally opinionated:
+
+- **source-backed over similarity-only**
+- **reviewable over opaque**
+- **current truth by default**
+- **historical truth when requested**
+- **structured facts over free-form memory**
+- **self-hostable by default**
+
+## Architecture
+
+### Backend
+
+- FastAPI
+- SQLAlchemy async ORM
+- PostgreSQL + `pgvector`
+- Redis
+- Celery
+- Alembic migrations
+
+### Frontend
+
+- React
+- Vite
+- React Query
+- React Router
+
+### Retrieval / Accuracy
+
+The current architecture supports:
+
+- schema-constrained extraction with rule fallback
+- structured fact storage in Postgres
+- provenance-aware query responses
+- temporal fact visibility
+- hybrid lexical + semantic scoring groundwork
+- eval summaries and case-level regressions
 
 ## Quick Start
 
-1. Copy `.env.example` to `.env`
-2. Generate an `ENCRYPTION_KEY` before using manual-token connectors:
+### 1. Configure the environment
+
+Copy the example env file:
+
+```bash
+cp .env.example .env
+```
+
+Generate an encryption key:
 
 ```bash
 python - <<'PY'
@@ -41,114 +128,119 @@ PY
 
 Put that value into `.env` as `ENCRYPTION_KEY=...`.
 
-3. Start the backend stack:
+For an offline/local OSS run, leave these blank:
+
+- `LITELLM_API_KEY`
+- `EXTRACTION_MODEL`
+- `EMBEDDING_MODEL`
+- `COHERE_API_KEY`
+
+### 2. Start the backend stack
 
 ```bash
 docker compose up -d postgres redis api worker
 ```
 
-4. Install dependencies with your preferred environment manager, for example:
+Apply migrations:
+
+```bash
+docker compose exec api alembic upgrade head
+```
+
+Seed the demo workspace:
+
+```bash
+docker compose exec api python scripts/seed_demo.py --json --replace-existing
+```
+
+Check health:
+
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8000/health/ready
+```
+
+### 3. Run the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite app will proxy API requests to the backend.
+
+## Local Development Without Docker
+
+If you already have PostgreSQL and Redis available locally:
 
 ```bash
 pip install -e ".[dev]"
-```
-
-5. Run a quick local preflight if you are starting services outside Compose:
-
-```bash
-python scripts/preflight_phase1.py
-```
-
-This checks `.env`, PostgreSQL, and Redis. If the API is already running, it
-also checks `/health` and `/health/ready`. After you start the API, you can
-require those checks explicitly:
-
-The Postgres check also verifies that the Phase 1 schema is present and the
-Alembic revision matches the initial migration. If it reports missing tables or
-the wrong revision, run:
-
-```bash
 alembic upgrade head
-```
-
-```bash
-python scripts/preflight_phase1.py --require-api
-```
-
-6. Run the migration locally when you are not relying on the Compose `api` container:
-
-```bash
-alembic upgrade head
-```
-
-7. Seed the deterministic demo workspace used by the smoke and eval flows:
-
-```bash
 python scripts/seed_demo.py --json --replace-existing
-```
-
-This prints a stable `workspace_id` you can reuse for local eval runs.
-
-8. If you are not using the Compose `api` service, run the API manually:
-
-```bash
 uvicorn app.main:app --reload
 ```
 
-If port `8000` is already in use:
+Start the worker separately:
 
 ```bash
-uvicorn app.main:app --reload --port 8001
+celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
 ```
 
-9. Create an empty workspace only if you want manual CRUD testing outside the seeded demo:
+Run the frontend:
 
 ```bash
-curl -X POST http://localhost:8000/api/workspaces \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Acme Demo","description":"Local test workspace"}'
+cd frontend
+npm install
+npm run dev
 ```
 
-10. Run the automated backend smoke test against the live API:
+## Accuracy / Eval Workflow
+
+Run the eval regression harness against a workspace:
 
 ```bash
-python scripts/smoke_phase1.py
+context-engine-eval-regression --workspace-id REPLACE_WITH_WORKSPACE_ID --json
 ```
 
-This validates health/readiness, workspace bootstrap, model/component/relationship
-CRUD, and the `/api/query` response path.
-
-If the API is running on a different port, pass `--base-url`, for example:
+The script wrapper also works:
 
 ```bash
-python scripts/smoke_phase1.py --base-url http://localhost:8001
+python scripts/run_eval_regression.py --workspace-id REPLACE_WITH_WORKSPACE_ID --json
 ```
 
-## Health Checks
+The current v1 accuracy gate is built around:
 
-- `GET /health` returns basic liveness
-- `GET /health/ready` verifies PostgreSQL and Redis connectivity
+- `25` gold-set cases
+- `5` domains: `pricing`, `blocker`, `roadmap`, `decision`, `meeting`
+- `>= 0.80` pass rate
+- `>= 0.80` retrieval quality
+- `>= 0.80` extracted fact correctness
+- `>= 0.75` final answer correctness
+- `<= 0.25` confidence calibration error
 
-## Accuracy Runtime Config
+## Optional Provider-Backed Models
 
-Provider-backed structured extraction and embeddings are optional in local OSS
-setups. Leave the keys blank to stay offline. For real models, set:
+If you want real extraction / embedding models instead of local fallbacks:
 
 ```bash
+LITELLM_API_KEY=...
 EXTRACTION_MODEL=openai/gpt-4.1-mini
 EMBEDDING_MODEL=openai/text-embedding-3-large
 EMBEDDING_DIMENSIONS=1024
-LITELLM_API_KEY=your-provider-key
 ```
 
-`LITELLM_API_BASE` is optional for non-default providers or gateways. The
-backend stores embeddings in a fixed `pgvector` column, so `EMBEDDING_DIMENSIONS`
-must match the database vector size. If `LITELLM_API_KEY` is present and the
-model env vars are omitted, the backend will fall back to the default provider
-models above. In `production`, missing real extraction or embedding models are
-treated as configuration errors rather than silently relying on local fallbacks.
+Optional reranking:
 
-For production Zoom OAuth + webhook ingestion, also set:
+```bash
+COHERE_API_KEY=...
+```
+
+## Connector Notes
+
+### Zoom
+
+For Zoom OAuth + webhooks:
 
 ```bash
 ZOOM_CLIENT_ID=...
@@ -157,101 +249,89 @@ ZOOM_REDIRECT_URI=https://your-api.example.com/api/connectors/zoom/callback
 ZOOM_WEBHOOK_SECRET=...
 ```
 
-The Zoom connector remains transcript-only. Webhooks now require valid
-`x-zm-signature` and `x-zm-request-timestamp` headers.
-OAuth-installed Zoom connectors support webhook-driven sync. Manual-token Zoom
-connections remain polling-only by design.
+The Zoom connector is transcript-first. Manual-token Zoom remains polling-based; OAuth-installed Zoom can support webhook-driven sync.
 
-GitHub does not require app-level env vars for the first pass. Use
-`POST /api/connectors/github/connect` with a manual token plus a repository list.
+### GitHub
 
-## Eval Regression
+GitHub does not require app-level env vars for the first pass. Connect via the backend API with a manual token and repository list.
 
-Run the startup-question regression harness against the seeded demo workspace:
+## Useful Commands
 
-```bash
-context-engine-eval-regression --workspace-id REPLACE_WITH_WORKSPACE_ID --json
-```
-
-The existing script wrapper still works:
-
-```bash
-python scripts/run_eval_regression.py --workspace-id REPLACE_WITH_WORKSPACE_ID --json
-```
-
-Phase 3B is currently frozen against these exit criteria:
-
-- `25` total gold-set cases
-- `5` required domains: `pricing`, `blocker`, `roadmap`, `decision`, `meeting`
-- `>= 0.80` pass rate
-- `>= 0.80` average retrieval hit quality
-- `>= 0.80` average extracted fact correctness
-- `>= 0.75` average final answer correctness
-- `<= 0.25` confidence calibration error
-
-CI enforces both the DB-backed regression tests and the CLI eval run via
-`.github/workflows/backend-accuracy.yml`.
-
-## CRUD Smoke Test
-
-Create a model:
-
-```bash
-curl -X POST http://localhost:8000/api/models \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_id":"REPLACE_WITH_WORKSPACE_ID",
-    "name":"Pricing",
-    "description":"Pricing tiers and packaging"
-  }'
-```
-
-List models for a workspace:
-
-```bash
-curl "http://localhost:8000/api/models?workspace_id=REPLACE_WITH_WORKSPACE_ID"
-```
-
-Add a component:
-
-```bash
-curl -X POST http://localhost:8000/api/models/REPLACE_WITH_MODEL_ID/components \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name":"Enterprise Price",
-    "value":"$500/seat",
-    "confidence":0.9,
-    "authority_source":"CEO Slack message"
-  }'
-```
-
-Create a relationship:
-
-```bash
-curl -X POST http://localhost:8000/api/relationships \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source_component_id":"REPLACE_SOURCE_COMPONENT_ID",
-    "target_component_id":"REPLACE_TARGET_COMPONENT_ID",
-    "relationship_type":"depends_on",
-    "sentiment":"neutral",
-    "confidence":0.8
-  }'
-```
-
-Run a query against structured context:
-
-```bash
-curl -X POST http://localhost:8000/api/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question":"What is our enterprise pricing?",
-    "workspace_id":"REPLACE_WITH_WORKSPACE_ID"
-  }'
-```
-
-Or run the same checks automatically:
+Backend smoke test:
 
 ```bash
 python scripts/smoke_phase1.py
 ```
+
+Backend tests:
+
+```bash
+python -m pytest tests/ -x --tb=short
+```
+
+Frontend tests:
+
+```bash
+cd frontend
+npm test
+```
+
+Frontend production build:
+
+```bash
+cd frontend
+npm run build
+```
+
+## API Surface
+
+Main API groups:
+
+- `/api/connectors`
+- `/api/source-documents`
+- `/api/review-items`
+- `/api/decisions`
+- `/api/founder-brief`
+- `/api/timeline`
+- `/api/launch-guard`
+- `/api/query`
+- `/api/evals`
+
+The router lives in [app/api/router.py](./app/api/router.py).
+
+## Repository Layout
+
+```text
+app/
+  api/           FastAPI route groups
+  connectors/    Connector implementations and strategy metadata
+  models/        SQLAlchemy models
+  processing/    Extraction, embeddings, reranking
+  services/      Core business logic
+  tasks/         Celery tasks
+alembic/         Database migrations
+frontend/        Operator/admin UI
+scripts/         Preflight, seeding, smoke, eval entrypoints
+tests/           Backend tests
+```
+
+## Current Status
+
+Context Engine is in late OSS v1 / hardening territory:
+
+- core product workflows exist
+- the operator UI is largely built
+- accuracy, provenance, review, and timeline surfaces are present
+- the remaining work is mostly runtime verification, hardening, and connector/workflow refinement
+
+## Positioning
+
+Context Engine is not trying to be generic enterprise search.
+
+It is a self-hostable, source-backed context system for fast-moving teams that need:
+
+- current truth
+- historical truth
+- explicit review state
+- source paths for every answer
+- startup-relevant workflows on top of raw company context
