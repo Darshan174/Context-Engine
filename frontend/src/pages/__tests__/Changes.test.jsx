@@ -121,7 +121,7 @@ describe("Changes", () => {
   it("renders the timeline and filters by type", async () => {
     renderChanges();
 
-    expect(screen.getByText("What Changed")).toBeInTheDocument();
+    expect(screen.getByText("Changes")).toBeInTheDocument();
     expect(screen.getByText("Launch the pricing page next Tuesday")).toBeInTheDocument();
     expect(screen.getByText("Pricing conflict")).toBeInTheDocument();
     expect(screen.getByText("Weekly Product Review transcript ingested")).toBeInTheDocument();

@@ -72,6 +72,7 @@ class IngestionService:
         """Process a single SourceDocument (used by reprocess endpoint).
 
         Returns 1 if the document was processed, 0 if already processed.
+        Uses a savepoint for isolation.
         """
         if document.processed_at is not None:
             return 0
@@ -81,9 +82,9 @@ class IngestionService:
         )
         model = await self._get_or_create_model(workspace_id, model_name, model_desc)
 
-        await self._ingest_document(model, document)
-
-        document.processed_at = datetime.now(timezone.utc)
+        async with self.session.begin_nested():
+            await self._ingest_document(model, document)
+            document.processed_at = datetime.now(timezone.utc)
         await self.session.flush()
         return 1
 
@@ -96,6 +97,10 @@ class IngestionService:
         """Process all unprocessed SourceDocuments for a specific connector.
 
         Returns the number of documents processed.
+
+        Each document is processed inside a nested savepoint so that a
+        failure in one document does not roll back the entire batch.
+        Embeddings are collected and flushed in batches after extraction.
         """
         docs = await self._select_unprocessed(connector_id)
         if not docs:
@@ -108,9 +113,10 @@ class IngestionService:
 
         processed = 0
         for doc in docs:
-            await self._ingest_document(model, doc)
-            doc.processed_at = datetime.now(timezone.utc)
-            processed += 1
+            ok = await self._ingest_document_with_savepoint(model, doc)
+            if ok:
+                doc.processed_at = datetime.now(timezone.utc)
+                processed += 1
 
         await self.session.flush()
         return processed
@@ -159,6 +165,24 @@ class IngestionService:
             await self.session.flush()
         return model
 
+    async def _ingest_document_with_savepoint(
+        self,
+        model: KnowledgeModel,
+        doc: SourceDocument,
+    ) -> bool:
+        """Ingest a single document inside a savepoint.
+
+        Returns True on success, False if the document failed to ingest.
+        This isolates failures — a bad document won't abort the batch.
+        """
+        try:
+            async with self.session.begin_nested():
+                await self._ingest_document(model, doc)
+                await self.session.flush()
+        except Exception:
+            return False
+        return True
+
     async def _create_component(
         self,
         model: KnowledgeModel,
@@ -167,6 +191,7 @@ class IngestionService:
         confidence: float,
         doc: SourceDocument,
         authority_weight: float,
+        embedding: list[float] | None = None,
     ) -> Component:
         """Create a new component version for a fact."""
         component = Component(
@@ -177,7 +202,7 @@ class IngestionService:
             authority_source=doc.source_url,
             authority_weight=authority_weight,
             valid_from=datetime.now(timezone.utc),
-            embedding=await self._embedder.embed_text(f"{name}\n{value}"),
+            embedding=embedding,
         )
         self.session.add(component)
         await self.session.flush()
@@ -290,13 +315,34 @@ class IngestionService:
         existing_links = await self._load_document_links(doc.id)
         retained_component_ids: set[UUID] = set()
 
-        for fact in facts:
-            component = await self._resolve_component_for_fact(
+        # Phase 1: resolve components and collect texts that need embedding
+        embedding_tasks: list[tuple[int, str, Component | None]] = []
+        resolved_components: list[Component | None] = [None] * len(facts)
+
+        for idx, fact in enumerate(facts):
+            component, needs_embed = await self._resolve_component_for_fact(
                 model=model,
                 fact=fact,
                 doc=doc,
                 observed_at=now,
             )
+            resolved_components[idx] = component
+            if needs_embed:
+                embedding_tasks.append(
+                    (idx, f"{component.name}\n{component.value}", component)
+                )
+
+        # Phase 2: batch embed all new / missing-embedding components
+        if embedding_tasks:
+            texts = [text for _, text, _ in embedding_tasks]
+            vectors = await self._embedder.embed_texts(texts)
+            for (idx, _text, component), vector in zip(embedding_tasks, vectors):
+                component.embedding = vector
+            await self.session.flush()
+
+        # Phase 3: link sources and create relationships
+        for idx, fact in enumerate(facts):
+            component = resolved_components[idx]
             await self._link_source(component, doc, fact)
             retained_component_ids.add(component.id)
 
@@ -343,7 +389,13 @@ class IngestionService:
         fact: ExtractedFact,
         doc: SourceDocument,
         observed_at: datetime,
-    ) -> Component:
+    ) -> tuple[Component, bool]:
+        """Resolve or create a component for a fact.
+
+        Returns ``(component, needs_embedding)`` where ``needs_embedding``
+        is True when the component's embedding field is None and must be
+        computed by the caller.
+        """
         name = fact.name
         value = fact.value
         confidence = fact.confidence
@@ -362,17 +414,14 @@ class IngestionService:
                 same_value.authority_weight,
                 authority_weight,
             )
-            if same_value.embedding is None:
-                same_value.embedding = await self._embedder.embed_text(
-                    f"{same_value.name}\n{same_value.value}"
-                )
+            needs_embed = same_value.embedding is None
             await self._sync_active_review_item(
                 same_value,
                 confidence=confidence,
                 conflicting_with=[],
             )
             await self.session.flush()
-            return same_value
+            return same_value, needs_embed
 
         component = await self._create_component(
             model,
@@ -381,6 +430,7 @@ class IngestionService:
             confidence,
             doc,
             authority_weight,
+            embedding=None,  # will be filled by batch embedding phase
         )
         strongest_active = max(
             active_components,
@@ -440,7 +490,7 @@ class IngestionService:
                 ),
             )
             await self.session.flush()
-            return component
+            return component, True
 
         for previous in active_components:
             await self._supersede_component(
@@ -459,7 +509,7 @@ class IngestionService:
             conflicting_with=[] if decisive_authority_gap else active_components,
         )
         await self.session.flush()
-        return component
+        return component, True
 
     async def _sync_active_review_item(
         self,

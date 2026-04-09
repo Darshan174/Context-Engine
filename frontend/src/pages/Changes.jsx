@@ -61,7 +61,7 @@ export default function Changes() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-gray-800">What Changed</h2>
+            <h2 className="text-lg font-semibold text-gray-800">Changes</h2>
             {usesMockData && <MockBadge />}
           </div>
           <p className="text-xs text-gray-400 mt-1">

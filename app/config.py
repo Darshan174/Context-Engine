@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     litellm_api_base: str | None = None
     litellm_timeout_seconds: int = 45
     enable_default_provider_models: bool = False
-    cohere_api_key: str | None = None
     encryption_key: str | None = None
     slack_client_id: str | None = None
     slack_client_secret: str | None = None
@@ -51,6 +50,17 @@ class Settings(BaseSettings):
     retrieval_stale_penalty: float = 0.15
     retrieval_min_semantic_score: float = 0.16
     authority_conflict_auto_resolve_margin: float = 0.15
+
+    # Document truncation / chunking for extraction
+    extraction_max_input_chars: int = 16_000
+    extraction_chunk_size_chars: int = 8_000
+    extraction_chunk_overlap_chars: int = 500
+
+    # Batch embedding settings
+    embedding_batch_size: int = 64
+
+    # Dev / local embedder flag
+    enable_local_embedder: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -24,6 +24,17 @@ class TestHashingEmbedder:
         assert len(vector1) == 8
         assert pytest.approx(math.sqrt(sum(value * value for value in vector1)), 0.0001) == 1.0
 
+    async def test_batch_embedding_matches_single_text_path(self):
+        embedder = HashingEmbedder(dimension=8)
+        texts = [
+            "Enterprise pricing is $600/seat",
+            "Founder brief highlights blockers",
+        ]
+
+        batched = await embedder.embed_texts(texts)
+
+        assert batched == [await embedder.embed_text(text) for text in texts]
+
 
 class TestCosineSimilarity:
     def test_accepts_numpy_arrays(self):
@@ -48,6 +59,31 @@ class TestLiteLLMEmbedder:
         vector = await embedder.embed_text("Enterprise pricing is $600/seat")
 
         assert vector == [0.1, 0.2, 0.3]
+
+    async def test_batches_multiple_texts_through_provider(self):
+        seen = {}
+
+        class _FakeService:
+            async def embed_texts(self, *, model, texts, dimensions):
+                seen["model"] = model
+                seen["texts"] = texts
+                seen["dimensions"] = dimensions
+                return [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]]
+
+        embedder = LiteLLMEmbedder(
+            "openai/text-embedding-3-large",
+            dimension=3,
+            service=_FakeService(),
+        )
+        vectors = await embedder.embed_texts(
+            ["Enterprise pricing is $600/seat", "Launch blockers are cleared"]
+        )
+
+        assert vectors == [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]]
+        assert seen["texts"] == [
+            "Enterprise pricing is $600/seat",
+            "Launch blockers are cleared",
+        ]
 
     async def test_wraps_provider_errors(self):
         class _FailingService:

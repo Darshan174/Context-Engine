@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel
 
 from app.services.llm_service import (
     LLMConfigurationError,
@@ -36,6 +37,32 @@ class TestLiteLLMService:
         assert seen_kwargs["model"] == "openai/gpt-4.1-mini"
         assert seen_kwargs["response_format"] == {"type": "json_object"}
         assert seen_kwargs["temperature"] == 0
+
+    async def test_completion_json_accepts_pydantic_response_format(self):
+        seen_kwargs = {}
+
+        class _Schema(BaseModel):
+            facts: list[dict] = []
+
+        async def _complete(**kwargs):
+            seen_kwargs.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content='{"facts": []}')
+                    )
+                ]
+            )
+
+        service = LiteLLMService(completion_fn=_complete)
+        content = await service.completion_json(
+            model="openai/gpt-4.1-mini",
+            messages=[{"role": "user", "content": "extract facts"}],
+            response_format=_Schema,
+        )
+
+        assert content == '{"facts": []}'
+        assert seen_kwargs["response_format"] is _Schema
 
     async def test_completion_json_requires_model(self):
         service = LiteLLMService(completion_fn=lambda **kwargs: None)

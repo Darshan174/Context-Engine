@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Type
+
+from pydantic import BaseModel
 
 from app.config import settings
 
@@ -44,6 +46,7 @@ class LiteLLMService:
         model: str | None,
         messages: list[dict[str, str]],
         temperature: float = 0,
+        response_format: Type[BaseModel] | dict[str, Any] | None = None,
     ) -> str:
         if not model:
             raise LLMConfigurationError("No extraction model is configured")
@@ -51,16 +54,32 @@ class LiteLLMService:
         completion = self._completion_fn or self._load_completion()
         if self._completion_fn is None and not has_live_litellm_api_key():
             raise LLMConfigurationError("LiteLLM API key is not configured")
+
+        # Default to JSON-only responses for legacy callers. When a Pydantic
+        # model is provided, pass it through directly so providers that support
+        # schema-constrained output can validate against the model.
+        effective_format: Type[BaseModel] | dict[str, Any]
+        if response_format is None:
+            effective_format = {"type": "json_object"}
+        elif isinstance(response_format, dict):
+            effective_format = response_format
+        elif isinstance(response_format, type) and issubclass(response_format, BaseModel):
+            effective_format = response_format
+        else:
+            effective_format = {"type": "json_object"}
+
+        request_kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": settings.litellm_api_key,
+            "api_base": settings.litellm_api_base,
+            "timeout": settings.litellm_timeout_seconds,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        request_kwargs["response_format"] = effective_format
+
         try:
-            response = await completion(
-                model=model,
-                api_key=settings.litellm_api_key,
-                api_base=settings.litellm_api_base,
-                timeout=settings.litellm_timeout_seconds,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=temperature,
-            )
+            response = await completion(**request_kwargs)
         except Exception as exc:
             raise LLMServiceError(
                 f"Structured completion failed: {exc.__class__.__name__}"

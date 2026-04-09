@@ -1,4 +1,4 @@
-name: Backend Accuracy
+name: Backend
 
 on:
   pull_request:
@@ -7,6 +7,41 @@ on:
       - main
 
 jobs:
+  test-full:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check app tests scripts
+
+      - name: Run full test suite
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/context_engine
+        run: python -m pytest tests/ -q
+
   backend-accuracy:
     runs-on: ubuntu-latest
     services:

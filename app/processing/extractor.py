@@ -5,6 +5,12 @@ Hierarchy:
   RegexExtractor           — local pattern fallback
   StructuredLLMExtractor   — strict structured extraction only
   FallbackExtractor        — tries structured extraction, falls back to regex
+
+Document truncation / chunking:
+  Long documents are truncated to ``settings.extraction_max_input_chars``
+  or split into overlapping chunks (``extraction_chunk_size_chars`` /
+  ``extraction_chunk_overlap_chars``).  Each chunk is extracted independently
+  and the resulting fact lists are merged and deduplicated.
 """
 
 from __future__ import annotations
@@ -67,6 +73,68 @@ _MEETING_ACTION_OWNER_RE = re.compile(
 _MEETING_DECISION_RE = re.compile(
     r"(?im)^\s*(?:(?P<speaker>[^:\n]{1,80}):\s*)?(?:decision|decided)\s*:\s*(?P<text>.+?)\s*$"
 )
+
+# ── Few-shot examples per connector type ──────────────────────────
+
+FEW_SHOT_EXAMPLES: dict[str, str] = {
+    "slack": (
+        "Example Slack message:\n"
+        "```\n"
+        "Channel: #engineering\n"
+        "Author: alice@acme.com\n"
+        "decision: migrate the user-service to Postgres 16\n"
+        "action item: bob to prepare the migration runbook by Friday\n"
+        "blocker: staging environment is currently down\n"
+        "```\n"
+        "Expected output:\n"
+        "```json\n"
+        '{\n'
+        '  "facts": [\n'
+        '    {"name": "Migrate user-service to Postgres 16", "value": "migrate the user-service to Postgres 16", "confidence": 0.9, "fact_type": "decision", "relationships": []},\n'
+        '    {"name": "Prepare migration runbook", "value": "bob to prepare the migration runbook by Friday", "confidence": 0.85, "fact_type": "action_item", "relationships": []},\n'
+        '    {"name": "Staging environment down", "value": "staging environment is currently down", "confidence": 0.88, "fact_type": "blocker", "relationships": []}\n'
+        "  ]\n"
+        "}\n"
+        "```\n"
+    ),
+    "zoom": (
+        "Example Zoom meeting transcript:\n"
+        "```\n"
+        "Meeting topic: Weekly Product Review\n"
+        "Founder: meeting outcome: launch pricing page on April 15.\n"
+        "Alice: action item: prepare demo environment.\n"
+        "Bob: AI: draft launch email.\n"
+        "```\n"
+        "Expected output:\n"
+        "```json\n"
+        '{\n'
+        '  "facts": [\n'
+        '    {"name": "Launch pricing page on April 15", "value": "launch pricing page on April 15", "confidence": 0.92, "fact_type": "decision", "relationships": []},\n'
+        '    {"name": "Prepare demo environment", "value": "Owner: Alice - prepare demo environment", "confidence": 0.88, "fact_type": "action_item", "relationships": []},\n'
+        '    {"name": "Draft launch email", "value": "Owner: Bob - draft launch email", "confidence": 0.88, "fact_type": "action_item", "relationships": []}\n'
+        "  ]\n"
+        "}\n"
+        "```\n"
+    ),
+    "github": (
+        "Example GitHub PR description / review:\n"
+        "```\n"
+        "Repository: acme/context-engine\n"
+        "Pull Request #77: Migration plan\n"
+        "Decision: use Postgres 16 rolling migration.\n"
+        "Rationale: avoids downtime during cutover.\n"
+        "```\n"
+        "Expected output:\n"
+        "```json\n"
+        '{\n'
+        '  "facts": [\n'
+        '    {"name": "Use Postgres 16 rolling migration", "value": "use Postgres 16 rolling migration", "confidence": 0.9, "fact_type": "decision", "relationships": []},\n'
+        '    {"name": "Rationale for rolling migration", "value": "avoids downtime during cutover", "confidence": 0.8, "fact_type": "discussion", "relationships": [{"target_fact_name": "Use Postgres 16 rolling migration", "relationship_type": "related_to", "confidence": 0.8}]}\n'
+        "  ]\n"
+        "}\n"
+        "```\n"
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,7 +443,12 @@ def extract_meeting_action_items(content: str) -> list[tuple[str | None, str]]:
 
 
 class LiteLLMStructuredClient:
-    """Thin adapter around LiteLLM for strict JSON-only extraction."""
+    """Thin adapter around LiteLLM for strict JSON-only extraction.
+
+    Uses ``response_format`` with the Pydantic model when the provider
+    supports it (OpenAI, Anthropic, recent LiteLLM versions).  Falls back
+    to ``json_object`` mode automatically for older providers.
+    """
 
     def __init__(self, model: str, *, service: LiteLLMService | None = None) -> None:
         self.model = model
@@ -397,13 +470,19 @@ class LiteLLMStructuredClient:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=settings.extraction_temperature,
+                response_format=StructuredExtractionPayload,
             )
         except (LLMConfigurationError, LLMServiceError, LLMResponseError) as exc:
             raise ExtractionError(str(exc)) from exc
 
 
 class StructuredLLMExtractor(BaseExtractor):
-    """Strict structured extractor that validates every field before ingestion."""
+    """Strict structured extractor that validates every field before ingestion.
+
+    Supports document truncation and overlapping chunk extraction for long
+    documents.  Few-shot examples are injected per connector type to improve
+    extraction quality.
+    """
 
     def __init__(
         self,
@@ -425,37 +504,114 @@ class StructuredLLMExtractor(BaseExtractor):
         if self._completion_fn is None:
             raise ExtractionError("Structured extraction model is not configured")
 
-        prompt = self._build_prompt(doc)
-        raw_output = await self._completion_fn(prompt)
-        payload = self._parse_payload(raw_output)
-        return self._normalize_facts(doc, payload)
+        content = self._prepare_content(doc.content)
+        chunks = self._chunk_content(content)
+        all_facts: list[ExtractedFact] = []
+
+        for chunk_text in chunks:
+            chunk_doc = self._make_chunk_document(doc, chunk_text)
+            prompt = self._build_prompt(chunk_doc)
+            raw_output = await self._completion_fn(prompt)
+            payload = self._parse_payload(raw_output)
+            all_facts.extend(self._normalize_facts(doc, payload))
+
+        return self._dedupe_extracted_facts(all_facts)
+
+    # ── Truncation / chunking ─────────────────────────────────────
 
     @staticmethod
-    def _build_prompt(doc: "SourceDocument") -> str:
+    def _prepare_content(content: str) -> str:
+        """Truncate content to the configured maximum character count."""
+        max_chars = settings.extraction_max_input_chars
+        if len(content) <= max_chars:
+            return content
+        return content[:max_chars] + "\n\n[... truncated for extraction ...]"
+
+    @staticmethod
+    def _chunk_content(content: str) -> list[str]:
+        """Split content into overlapping chunks if it exceeds the chunk size."""
+        chunk_size = settings.extraction_chunk_size_chars
+        overlap = settings.extraction_chunk_overlap_chars
+
+        if len(content) <= chunk_size:
+            return [content]
+
+        chunks: list[str] = []
+        start = 0
+        while start < len(content):
+            end = min(start + chunk_size, len(content))
+            chunk = content[start:end]
+            chunks.append(chunk)
+            if end >= len(content):
+                break
+            start = end - overlap if overlap < chunk_size else end
+        return chunks
+
+    @staticmethod
+    def _make_chunk_document(
+        doc: "SourceDocument",
+        chunk_content: str,
+    ) -> "SourceDocument":
+        """Create a lightweight SourceDocument-like wrapper for a single chunk."""
+        from unittest.mock import MagicMock
+
+        mock = MagicMock(spec=type(doc))
+        mock.content = chunk_content
+        mock.metadata_json = doc.metadata_json
+        mock.author = doc.author
+        mock.connector_type = doc.connector_type
+        mock.source_url = doc.source_url
+        mock.external_id = doc.external_id
+        return mock
+
+    @staticmethod
+    def _dedupe_extracted_facts(facts: list[ExtractedFact]) -> list[ExtractedFact]:
+        """Deduplicate facts across chunks by (name, value, fact_type)."""
+        deduped: list[ExtractedFact] = []
+        seen: set[tuple[str, str, str]] = set()
+        for fact in facts:
+            key = (fact.name.lower(), fact.value.lower(), fact.fact_type)
+            if key in seen:
+                continue
+            deduped.append(fact)
+            seen.add(key)
+        return deduped
+
+    # ── Prompt building ───────────────────────────────────────────
+
+    def _build_prompt(self, doc: "SourceDocument") -> str:
         metadata = doc.metadata_json or {}
         source_context = RegexExtractor._source_context_label(metadata)
-        return (
-            "You are an extraction system for source-backed startup knowledge."
-            "\nReturn strict JSON only."
-            "\nSchema: "
+        connector_key = doc.connector_type.value.lower()
+        few_shot = FEW_SHOT_EXAMPLES.get(connector_key, "")
+
+        prompt_parts = [
+            "You are an extraction system for source-backed startup knowledge.",
+            "Return strict JSON only.",
+            "Schema: ",
             '{"facts":[{"name":"","value":"","confidence":0.0,"fact_type":"decision",'
-            '"relationships":[{"target_fact_name":"","relationship_type":"related_to","confidence":0.0}]}]}.'
-            "\nRules:"
-            "\n- Extract only explicit atomic facts grounded in the source text."
-            "\n- Never output summaries, implications, or combined facts."
-            "\n- Use fact_type only from: decision, action_item, blocker, discussion."
-            "\n- Prefer concise, canonical fact names."
-            "\n- Use relationships only when the source text explicitly states them."
-            "\n- Confidence should reflect extraction certainty, not business importance."
-            f"\n- Return at most {settings.extraction_max_facts_per_document} facts."
-            f"\n- Source context label: {source_context}"
-            f"\nConnector: {doc.connector_type.value}"
-            f"\nMetadata: {json.dumps(metadata, sort_keys=True)}"
-            f"\nAuthor: {doc.author or ''}"
-            f"\nSource URL: {doc.source_url or ''}"
-            "\nDocument:\n"
-            f"{doc.content}"
-        )
+            '"relationships":[{"target_fact_name":"","relationship_type":"related_to","confidence":0.0}]}]}.',
+            "Rules:",
+            "- Extract only explicit atomic facts grounded in the source text.",
+            "- Never output summaries, implications, or combined facts.",
+            "- Use fact_type only from: decision, action_item, blocker, discussion.",
+            "- Prefer concise, canonical fact names.",
+            "- Use relationships only when the source text explicitly states them.",
+            "- Confidence should reflect extraction certainty, not business importance.",
+            "- If the document contains more than the limit, keep only the highest-signal facts: decisions first, then blockers, then action items, then discussion.",
+            f"- Return at most {settings.extraction_max_facts_per_document} facts.",
+            f"- Source context label: {source_context}",
+            f"- Connector: {doc.connector_type.value}",
+            f"- Metadata: {json.dumps(metadata, sort_keys=True)}",
+            f"- Author: {doc.author or ''}",
+            f"- Source URL: {doc.source_url or ''}",
+        ]
+
+        if few_shot:
+            prompt_parts.append(f"\nExamples for {connector_key}:\n{few_shot}")
+
+        prompt_parts.append(f"\nDocument:\n{doc.content}")
+        return "\n".join(prompt_parts)
 
     def _normalize_facts(
         self,

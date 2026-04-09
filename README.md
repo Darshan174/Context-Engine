@@ -133,7 +133,6 @@ For an offline/local OSS run, leave these blank:
 - `LITELLM_API_KEY`
 - `EXTRACTION_MODEL`
 - `EMBEDDING_MODEL`
-- `COHERE_API_KEY`
 
 ### 2. Start the backend stack
 
@@ -228,12 +227,6 @@ LITELLM_API_KEY=...
 EXTRACTION_MODEL=openai/gpt-4.1-mini
 EMBEDDING_MODEL=openai/text-embedding-3-large
 EMBEDDING_DIMENSIONS=1024
-```
-
-Optional reranking:
-
-```bash
-COHERE_API_KEY=...
 ```
 
 ## Connector Notes

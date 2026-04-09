@@ -26,7 +26,16 @@ import {
 // ── Helpers ────────────────────────────────────────────────────
 
 /**
- * Wrap an API call so it falls back to mock data on network failure.
+ * When true, hooks silently return mock fixtures on backend failure.
+ * Default is false — network/backend errors surface as real errors.
+ *
+ * Enable with: VITE_USE_MOCKS=true in .env or environment.
+ */
+const MOCKS_ENABLED = import.meta.env.VITE_USE_MOCKS === "true";
+
+/**
+ * Wrap an API call so it falls back to mock data on network failure,
+ * but only when VITE_USE_MOCKS=true. Otherwise errors propagate.
  *
  * `fallbackStatuses` is for endpoints that are intentionally stubbed out
  * in the backend for the current phase (for example 404/501 during Phase 1).
@@ -39,11 +48,12 @@ function withFallback(apiFn, mockData, { fallbackStatuses = [] } = {}) {
       if (err.status && !fallbackStatuses.includes(err.status)) {
         throw err; // real API error (4xx/5xx) — propagate
       }
+      if (!MOCKS_ENABLED) throw err;
       if (err.status) {
-        console.warn(`[api] endpoint unavailable (${err.status}), using mock data`);
+        console.warn(`[api] endpoint unavailable (${err.status}), using mock data (VITE_USE_MOCKS=true)`);
         return mockData;
       }
-      console.warn("[api] backend unreachable, using mock data");
+      console.warn("[api] backend unreachable, using mock data (VITE_USE_MOCKS=true)");
       return mockData;
     }
   };
@@ -364,10 +374,11 @@ export function useSourceDocuments(filters = {}) {
         if (err.status && ![404, 501].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         if (err.status) {
-          console.warn(`[api] source-documents unavailable (${err.status}), using mock data`);
+          console.warn(`[api] source-documents unavailable (${err.status}), using mock data (VITE_USE_MOCKS=true)`);
         } else {
-          console.warn("[api] backend unreachable for source-documents, using mock data");
+          console.warn("[api] backend unreachable for source-documents, using mock data (VITE_USE_MOCKS=true)");
         }
         if (pageParam) {
           return {
@@ -419,6 +430,7 @@ export function useSourceDocument(documentId) {
         if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         const fallback = normalizeSourceDocuments(mockSourceDocuments).find((doc) => doc.id === documentId);
         return fallback ?? null;
       }
@@ -441,6 +453,7 @@ export function useSourceDocumentComponents(documentId) {
         if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return buildMockSourceComponentRefs(documentId);
       }
     },
@@ -462,6 +475,7 @@ export function useComponentSources(componentId, { enabled = true } = {}) {
         if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return buildMockComponentSources(componentId);
       }
     },
@@ -487,6 +501,7 @@ export function useSourceDocumentReviewItems(documentId) {
         if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return buildMockSourceReviewItems(documentId);
       }
     },
@@ -510,6 +525,7 @@ export function useConnectorProcessingSummary() {
         if (err.status && ![404, 501].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return {
           items: buildMockProcessingSummary(mockSourceDocuments),
           isMock: true,
@@ -539,6 +555,7 @@ export function useReviewQueue(filters = {}) {
         if (err.status && ![404, 501].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return {
           items: filterReviewItems(normalizeReviewItems(mockReviewQueue), { status, severity, kind }),
           isMock: true,
@@ -569,6 +586,7 @@ export function useEvalSummary() {
         if (err.status && ![400, 404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return { summary: normalizeEvalSummary(mockEvalSummary), isMock: true };
       }
     },
@@ -597,6 +615,7 @@ export function useEvalCases(domain, { enabled = true } = {}) {
         if (err.status && ![400, 404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return {
           payload: normalizeEvalCases(mockEvalCasesByDomain[domain] ?? { selectedDomain: domain, cases: [] }),
           isMock: true,
@@ -671,6 +690,7 @@ export function useFounderBrief(lookbackDays = 7) {
         if (err.status && ![404, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return { brief: buildMockFounderBrief(), isMock: true };
       }
     },
@@ -716,6 +736,7 @@ export function useTimeline(limit = 50) {
         if (err.status && ![404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         if (pageParam) {
           return {
             timeline: {
@@ -781,6 +802,7 @@ export function useDecisionRegister() {
         if (err.status && ![404, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         const documents = normalizeSourceDocuments(mockSourceDocuments).filter(
           isDecisionLikeDocument,
         );
@@ -889,6 +911,7 @@ export function useLaunchGuardContext() {
         if (err.status && ![400, 404, 422, 500, 501, 502, 503].includes(err.status)) {
           throw err;
         }
+        if (!MOCKS_ENABLED) throw err;
         return {
           payload: buildMockLaunchGuardContext(),
           isMock: true,
@@ -963,9 +986,10 @@ export function useContextQuery() {
           ...(request.asOf ? { as_of: request.asOf } : {}),
         });
       } catch (err) {
-        // Only fall back to mock on network errors (backend unreachable).
-        // Real server errors (4xx/5xx) have a status — let them propagate.
+        // Only fall back to mock on network errors (backend unreachable)
+        // and only when VITE_USE_MOCKS=true.
         if (err.status) throw err;
+        if (!MOCKS_ENABLED) throw err;
 
         // Simulate latency then return a mock answer that best matches the question
         await new Promise((r) => setTimeout(r, 800));

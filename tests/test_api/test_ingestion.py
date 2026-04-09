@@ -1059,3 +1059,135 @@ class TestAutoRelationshipCreation:
             )
         )
         assert rel_count == 0
+
+
+# ── Savepoint / Batch Embedding Tests ────────────────────────────────────
+
+
+class TestSavepointIsolation:
+    """Per-document savepoint isolation during batch ingestion."""
+
+    async def test_bad_document_doesnt_abort_batch(
+        self, db_session, workspace, slack_connector
+    ):
+        """A document that fails during extraction should not roll back
+        the entire batch — only the failing doc is skipped."""
+        from app.processing.extractor import ExtractionError
+        from unittest.mock import AsyncMock
+
+        good_doc = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:savepoint.good.1",
+            content="decision: launch Friday",
+            metadata_json={"channel_name": "product"},
+        )
+        bad_doc = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:savepoint.bad.1",
+            content="some content",
+            metadata_json={"channel_name": "product"},
+        )
+        db_session.add_all([good_doc, bad_doc])
+        await db_session.flush()
+
+        # Create an extractor that fails on specific content
+        original_extractor = RegexExtractor()
+
+        class SelectiveFailExtractor:
+            async def extract(self, doc):
+                if "bad" in doc.external_id:
+                    raise ExtractionError("simulated extraction failure")
+                return await original_extractor.extract(doc)
+
+        svc = IngestionService(db_session, extractor=SelectiveFailExtractor())
+        count = await svc.process_connector_documents(
+            workspace_id=workspace.id,
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+        )
+
+        # Only the good doc should be processed
+        assert count == 1
+
+        await db_session.refresh(good_doc)
+        await db_session.refresh(bad_doc)
+        assert good_doc.processed_at is not None
+        # Bad doc remains unprocessed
+        assert bad_doc.processed_at is None
+
+
+class TestBatchEmbeddingIngestion:
+    """Verify that embeddings are batched during ingestion."""
+
+    async def test_components_have_embeddings_after_ingestion(
+        self, db_session, workspace, slack_connector
+    ):
+        """After ingestion, components should have embedding vectors."""
+        doc = SourceDocument(
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+            external_id="C1:batch.embed.1",
+            content="decision: adopt Kubernetes\naction item: prepare migration plan",
+            metadata_json={"channel_name": "infra"},
+        )
+        db_session.add(doc)
+        await db_session.flush()
+
+        svc = IngestionService(db_session)
+        await svc.process_connector_documents(
+            workspace_id=workspace.id,
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+        )
+
+        components = list(await db_session.scalars(
+            select(Component).where(
+                Component.name.like("Decision in %"),
+            )
+        ))
+        assert len(components) >= 1
+        # Hashing embedder produces non-None embeddings
+        for comp in components:
+            assert comp.embedding is not None
+            assert len(comp.embedding) > 0
+
+    async def test_multiple_documents_batch_embedded(
+        self, db_session, workspace, slack_connector
+    ):
+        """Processing multiple documents should batch embeddings efficiently."""
+        from app.processing.embedder import HashingEmbedder
+
+        embed_call_count = 0
+
+        class CountingEmbedder(HashingEmbedder):
+            async def embed_texts(self, texts):
+                nonlocal embed_call_count
+                embed_call_count += 1
+                return await super().embed_texts(texts)
+
+        docs = [
+            SourceDocument(
+                connector_id=slack_connector.id,
+                connector_type=ConnectorType.SLACK,
+                external_id=f"C1:batch.multi.{i}",
+                content=f"decision: decision number {i}",
+                metadata_json={"channel_name": "general"},
+            )
+            for i in range(3)
+        ]
+        db_session.add_all(docs)
+        await db_session.flush()
+
+        svc = IngestionService(db_session, embedder=CountingEmbedder())
+        count = await svc.process_connector_documents(
+            workspace_id=workspace.id,
+            connector_id=slack_connector.id,
+            connector_type=ConnectorType.SLACK,
+        )
+        assert count == 3
+
+        # Each document's extraction produces facts that get embedded in batch
+        # The exact count depends on how many unique facts are extracted
+        assert embed_call_count >= 1

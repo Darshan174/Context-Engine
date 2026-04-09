@@ -71,7 +71,7 @@ export default function Query() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold text-gray-800">Context Query</h2>
+        <h2 className="text-lg font-semibold text-gray-800">Ask the workspace</h2>
         {isMock && result && <MockBadge />}
         {!isMock && result && (
           <span className="px-2 py-0.5 text-[11px] rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">

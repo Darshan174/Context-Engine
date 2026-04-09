@@ -37,13 +37,21 @@ async def _run_sync_async(sync_job_id: str, connector_id: str) -> dict:
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+    logger.info(
+        "sync.start",
+        extra={"sync_job_id": sync_job_id, "connector_id": connector_id},
+    )
+
     try:
         async with AsyncSessionLocal() as session:
             # Phase 1: mark RUNNING
             async with session.begin():
                 job = await session.get(SyncJob, sync_job_id)
                 if job is None:
-                    logger.error("SyncJob %s not found", sync_job_id)
+                    logger.error(
+                        "sync.fail",
+                        extra={"sync_job_id": sync_job_id, "reason": "job_not_found"},
+                    )
                     return {"error": "job not found"}
 
                 connector = await session.get(Connector, connector_id)
@@ -51,6 +59,10 @@ async def _run_sync_async(sync_job_id: str, connector_id: str) -> dict:
                     job.status = SyncJobStatus.FAILED
                     job.error_type = "ConnectorNotFound"
                     job.error_message = f"Connector {connector_id} not found"
+                    logger.error(
+                        "sync.fail",
+                        extra={"sync_job_id": sync_job_id, "reason": "connector_not_found"},
+                    )
                     return {"error": "connector not found"}
 
                 try:
@@ -59,6 +71,14 @@ async def _run_sync_async(sync_job_id: str, connector_id: str) -> dict:
                     job.status = SyncJobStatus.FAILED
                     job.error_type = "EncryptionError"
                     job.error_message = str(exc)
+                    logger.error(
+                        "sync.fail",
+                        extra={
+                            "sync_job_id": sync_job_id,
+                            "reason": "token_error",
+                            "error_type": type(exc).__name__,
+                        },
+                    )
                     return {"error": str(exc)}
 
                 job.status = SyncJobStatus.RUNNING
@@ -82,6 +102,16 @@ async def _run_sync_async(sync_job_id: str, connector_id: str) -> dict:
                         "documents_processed": result.documents_processed,
                         "sync_mode": result.sync_mode,
                     }
+                    logger.info(
+                        "sync.complete",
+                        extra={
+                            "sync_job_id": sync_job_id,
+                            "connector_id": connector_id,
+                            "documents_fetched": result.documents_fetched,
+                            "documents_persisted": result.documents_persisted,
+                            "documents_processed": result.documents_processed,
+                        },
+                    )
                     return job.result_metadata
 
                 except Exception as exc:
@@ -89,7 +119,14 @@ async def _run_sync_async(sync_job_id: str, connector_id: str) -> dict:
                     job.completed_at = datetime.now(timezone.utc)
                     job.error_type = exc.__class__.__name__
                     job.error_message = str(exc)
-                    logger.exception("Sync failed for connector %s", connector_id)
+                    logger.exception(
+                        "sync.fail",
+                        extra={
+                            "sync_job_id": sync_job_id,
+                            "connector_id": connector_id,
+                            "error_type": exc.__class__.__name__,
+                        },
+                    )
                     return {
                         "error": str(exc),
                         "error_type": exc.__class__.__name__,

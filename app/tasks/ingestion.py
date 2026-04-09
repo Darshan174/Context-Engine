@@ -38,12 +38,20 @@ async def _run_ingestion_async(sync_job_id: str, document_id: str) -> dict:
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+    logger.info(
+        "ingestion.start",
+        extra={"sync_job_id": sync_job_id, "document_id": document_id},
+    )
+
     try:
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 job = await session.get(SyncJob, sync_job_id)
                 if job is None:
-                    logger.error("SyncJob %s not found", sync_job_id)
+                    logger.error(
+                        "ingestion.fail",
+                        extra={"sync_job_id": sync_job_id, "reason": "job_not_found"},
+                    )
                     return {"error": "job not found"}
 
                 doc = await session.get(SourceDocument, UUID(document_id))
@@ -51,6 +59,10 @@ async def _run_ingestion_async(sync_job_id: str, document_id: str) -> dict:
                     job.status = SyncJobStatus.FAILED
                     job.error_type = "DocumentNotFound"
                     job.error_message = f"SourceDocument {document_id} not found"
+                    logger.error(
+                        "ingestion.fail",
+                        extra={"sync_job_id": sync_job_id, "reason": "document_not_found"},
+                    )
                     return {"error": "document not found"}
 
                 connector = await session.get(Connector, doc.connector_id)
@@ -58,6 +70,10 @@ async def _run_ingestion_async(sync_job_id: str, document_id: str) -> dict:
                     job.status = SyncJobStatus.FAILED
                     job.error_type = "ConnectorNotFound"
                     job.error_message = "Connector for document not found"
+                    logger.error(
+                        "ingestion.fail",
+                        extra={"sync_job_id": sync_job_id, "reason": "connector_not_found"},
+                    )
                     return {"error": "connector not found"}
 
                 job.status = SyncJobStatus.RUNNING
@@ -83,6 +99,14 @@ async def _run_ingestion_async(sync_job_id: str, document_id: str) -> dict:
                         "documents_processed": processed,
                         "document_id": document_id,
                     }
+                    logger.info(
+                        "ingestion.complete",
+                        extra={
+                            "sync_job_id": sync_job_id,
+                            "document_id": document_id,
+                            "documents_processed": processed,
+                        },
+                    )
                     return job.result_metadata
 
                 except Exception as exc:
@@ -90,7 +114,14 @@ async def _run_ingestion_async(sync_job_id: str, document_id: str) -> dict:
                     job.completed_at = datetime.now(timezone.utc)
                     job.error_type = exc.__class__.__name__
                     job.error_message = str(exc)
-                    logger.exception("Ingestion failed for document %s", document_id)
+                    logger.exception(
+                        "ingestion.fail",
+                        extra={
+                            "sync_job_id": sync_job_id,
+                            "document_id": document_id,
+                            "error_type": exc.__class__.__name__,
+                        },
+                    )
                     return {"error": str(exc), "error_type": exc.__class__.__name__}
     finally:
         await engine.dispose()

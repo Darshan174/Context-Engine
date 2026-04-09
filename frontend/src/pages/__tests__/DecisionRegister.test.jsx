@@ -143,7 +143,7 @@ describe("DecisionRegister", () => {
 
     renderDecisionRegister();
 
-    expect(screen.getByText("Decision Register")).toBeInTheDocument();
+    expect(screen.getByText("Decisions")).toBeInTheDocument();
     expect(screen.getByText("Current decisions")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Needs review" })).toBeInTheDocument();
     expect(screen.getByText("Enterprise pricing moves to $600 per seat")).toBeInTheDocument();

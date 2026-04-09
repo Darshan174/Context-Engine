@@ -1,2 +1,0 @@
-"""Rate limiting utilities placeholder."""
-

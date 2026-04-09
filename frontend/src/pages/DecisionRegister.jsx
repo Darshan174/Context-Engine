@@ -49,7 +49,7 @@ export default function DecisionRegister() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-gray-800">Decision Register</h2>
+            <h2 className="text-lg font-semibold text-gray-800">Decisions</h2>
             {query.isMock && <MockBadge />}
           </div>
           <p className="text-xs text-gray-400 mt-1">
@@ -222,8 +222,11 @@ function DecisionCard({ item }) {
             <div className="mt-3">
               <p className="text-[11px] uppercase tracking-wide text-gray-500">Rationale sources</p>
               <div className="mt-2 space-y-2">
-                {item.rationaleSources.slice(0, 2).map((source) => (
-                  <div key={source.id} className="text-xs text-gray-600">
+                {item.rationaleSources.slice(0, 2).map((source, index) => (
+                  <div
+                    key={source.id ?? source.sourceDocumentId ?? `${source.label ?? "source"}-${index}`}
+                    className="text-xs text-gray-600"
+                  >
                     <p className="font-medium text-gray-700">{source.label}</p>
                     <p className="mt-0.5 text-[11px] text-gray-500">
                       {[source.author, source.connectorType].filter(Boolean).join(" · ")}
