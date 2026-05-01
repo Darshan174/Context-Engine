@@ -1,128 +1,288 @@
-# Connector And Knowledge Graph Contract
+# Connector / Knowledge Graph Contract
 
 Last updated: 2026-05-01
+Reviewed: 2026-05-01 by Xiaomi MiMo V2.5 Pro
+Branch: `agent/xiaomi-repo-review-docs`
 
-## Current State
+---
 
-### Implemented
+## 1. Connector Response Schema
 
-- `GET /api/connectors` returns a wrapped object with `connectors` and `setupStatus`.
-- Connector records include `connector_type` for frontend normalization.
-- AI Context import is supported through `POST /api/connectors/ai-context/import`.
-- AI-context source types are grouped in processing summaries:
-  - `ai_context`
-  - `ai_context_codex`
-  - `ai_context_claude_code`
-  - `ai_context_opencode`
-- Slack, Discord, and Gmail do not have working external-provider sync paths.
-- Slack connect is rejected instead of creating a fake connected state.
-- `/api/graph` includes `active`, `needs_review`, and `proposed` components.
-- SQLite startup migration adds `relationships.confidence` and `relationships.evidence` for existing local databases.
+### 1.1 Wrapped Response Shape
 
-### Not Implemented Yet
+**Implemented:** `GET /api/connectors` returns a wrapped object with two keys:
+- `connectors`: list of connector objects
+- `setupStatus`: list of setup status objects
 
-- Slack OAuth install/callback and Slack API sync.
-- Discord API sync.
-- Gmail OAuth and mailbox sync.
-- Zoom, Google Drive, Notion, GitHub, and Wispr provider backends.
-- Alembic-based production migration management.
-- A dedicated frontend AI Context import form.
+**Evidence:** `app/api/connectors.py`, lines 363–421. The handler returns `{"connectors": result, "setupStatus": setup_status}`.
 
-## Connector Catalog Rules
+**Evidence:** `tests/test_connectors.py`, lines 73–84. The test `test_list_connectors_returns_all_catalog_entries` asserts `"connectors" in data` and `"setupStatus" in data`.
 
-Backend catalog lives in `app/api/connectors.py`.
+### 1.2 Connector Object Fields
 
-Frontend catalog lives in `frontend/src/api/hooks.js`.
+**Implemented:** Each connector object in the `connectors` list includes:
+- `connector_type` (mirrors `type`)
+- `type`, `name`, `description`, `color`
+- `availability`, `provider`, `provider_label`, `provider_note`
+- `status`, `last_sync`, `items_synced`
+- `message` (for unsupported connectors)
+- `team_name`, `scope`, `sync_queued_at`, `sync_mode`, `sync_mode_note`
+- `processed_count`, `total_processed_count`
+- `auth_mode`, `account_id`, `ingestion_mode`, `source_focus`
+- `last_webhook_event`, `last_webhook_received_at`
+- `is_configured`, `managed_connect_available`, `managed_install_url`
+- `config`: a nested dict with non-null config values
 
-The catalogs must not contradict each other:
+**Evidence:** `app/api/connectors.py`, lines 363–421. The handler serializes `ConnectorRead` and injects `connector_type`, `last_sync_at`, and a `config` dict.
 
-- implemented connector types must appear in the frontend catalog;
-- frontend-only future connectors must use `coming_soon`;
-- unsupported providers must not expose a working connect/sync UX;
-- backend responses must include enough fields for `normalizeConnectors`.
+**Evidence:** `tests/test_connectors.py`, lines 86–100. The test `test_connector_response_has_frontend_shape` asserts `connector_type`, `config`, and their types.
 
-Current backend connector types:
+### 1.3 Setup Status Shape
 
-- `slack`: available in catalog, unsupported for connect/sync until OAuth exists.
-- `discord`: coming soon.
-- `gmail`: coming soon.
-- `ai_context`: available through import endpoint.
-- `local`: available through Sources workflow.
+**Implemented:** `GET /api/connectors/setup-status` returns a list of objects with:
+- `connector_type`, `type`, `name`
+- `configured` (bool)
+- `status` (string: `available`, `coming_soon`, `disconnected`, etc.)
+- `availability`, `auth_mode`
 
-## AI Context Contract
+**Evidence:** `app/api/connectors.py`, lines 424–429 and 327–360.
 
-AI context import accepts one or more documents with:
+**Evidence:** `tests/test_connectors.py`, lines 166–199.
 
-- `external_id`
-- `content`
-- optional `author`
-- optional `tool`
-- optional `session_type`
-- optional `session_id`
-- optional timestamps
-- optional metadata
+---
 
-Tool mapping:
+## 2. AI Context Import and Source Type Counting
 
-- `codex` -> `ai_context_codex`
-- `claude_code` -> `ai_context_claude_code`
-- `opencode` -> `ai_context_opencode`
-- unknown or generic tools -> `ai_context`
+### 2.1 Import Endpoint
 
-Metadata must preserve `tool`, `session_type`, `session_id`, branch/task details, and `ingested_via=ai_context_import` when provided.
+**Implemented:** `POST /api/connectors/ai-context/import` accepts a payload with `documents`, each having:
+- `external_id` (required)
+- `content` (required)
+- `author`, `tool`, `session_type`, `session_id`, `started_at`, `ended_at`, `metadata` (optional)
 
-## Graph Contract
+**Evidence:** `app/api/connectors.py`, lines 472–531.
 
-Graph responses must include:
+### 2.2 Tool-to-Source-Type Mapping
 
-- models with component counts;
-- components with model ID/name, value, fact type, confidence, status, source document ID, source type, source URL, and ingestion time;
-- relationships with source component, target component, type, confidence, and evidence.
+**Implemented:** Tools are mapped to source types as follows:
+- `codex` → `ai_context_codex`
+- `claude_code` → `ai_context_claude_code`
+- `opencode` → `ai_context_opencode`
+- `cursor`, `generic`, or unknown → `ai_context`
 
-Graph status visibility:
+**Evidence:** `app/api/connectors.py`, lines 487–493.
 
-- `active`: current accepted context;
-- `needs_review`: low-confidence or past context that needs review;
-- `proposed`: future/planned context;
-- stale/deprecated values stay hidden from default graph responses unless a future filter explicitly requests them.
+### 2.3 Processing Summary Groups AI Context Subtypes
 
-## Relationship Rules
+**Implemented:** `GET /api/connectors/processing-summary` counts all AI context subtypes under the single `ai_context` bucket.
 
-Relationships are optional.
+**Evidence:** `app/api/connectors.py`, lines 437–443. The `all_types` dict maps `ai_context` to the list `["ai_context", "ai_context_codex", "ai_context_claude_code", "ai_context_opencode"]`. The query groups by the literal `source_type`, then Python sums the counts for all subtypes into the `ai_context` display bucket.
 
-Create relationships only when:
+**Evidence:** `tests/test_connectors.py`, lines 523–560. The test `test_processing_summary_counts_ai_context_subtypes_together` creates documents with all four subtypes and asserts the summary returns `total_documents >= 4` for `ai_context`.
 
-- the extractor returns an explicit relationship with confidence at or above threshold;
-- a target component can be resolved without ambiguity;
-- duplicate relationship rows are avoided;
-- self-loops are rejected.
+---
 
-Do not create relationships from weak semantic similarity alone.
+## 3. Unsupported Connector States
 
-## SQLite Migration Contract
+### 3.1 Slack Connect is Rejected
 
-Startup runs `Base.metadata.create_all()` and then `run_migrations()`.
+**Implemented:** `POST /connectors/slack/connect` returns `400` because Slack has `"supported": False` in the catalog.
 
-Current migration:
+**Evidence:** `app/api/connectors.py`, lines 553–557. The handler checks `if not catalog_entry.get("supported", True)` and raises `HTTPException(status_code=400)`.
 
-- no-ops when the `relationships` table does not exist;
-- adds `relationships.confidence FLOAT NOT NULL DEFAULT 0.7` when missing;
-- adds `relationships.evidence TEXT` when missing;
-- backfills missing confidence/evidence values;
-- is idempotent;
-- does not overwrite existing custom values.
+**Evidence:** `tests/test_connectors.py`, lines 202–208. The test `test_connect_slack_returns_400_unsupported` asserts status code `400` and checks the detail message.
 
-## Verification
+**Evidence:** `tests/test_connectors.py`, lines 629–636. The test `test_slack_connect_returns_400_unsupported` also asserts `400`.
 
-Current expected checks:
+### 3.2 Slack Sync Returns Failed Job
+
+**Implemented:** If a Slack connector row exists and a sync is triggered, the sync endpoint creates a `SyncJob` with `status="failed"`, `error_type="unsupported_connector"`.
+
+**Evidence:** `app/api/connectors.py`, lines 605–617.
+
+**Evidence:** `tests/test_connectors.py`, lines 610–627. The test `test_slack_sync_returns_unsupported_error` asserts `status == "failed"` and `error_type == "unsupported_connector"`.
+
+### 3.3 Discord and Gmail Are Coming Soon
+
+**Implemented:** Discord and Gmail have `"availability": "coming_soon"` and `"supported": False`. Their connect endpoints return `400`.
+
+**Evidence:** `app/api/connectors.py`, lines 34–57 (catalog entries).
+
+**Evidence:** `tests/test_connectors.py`, lines 217–229.
+
+---
+
+## 4. Graph Visibility
+
+### 4.1 Proposed Components Are Visible
+
+**Implemented:** `GET /api/graph` includes components with status `proposed` alongside `active` and `needs_review`.
+
+**Evidence:** `app/api/graph.py`, line 78. The query uses `.where(Component.status.in_(["active", "needs_review", "proposed"]))`.
+
+**Evidence:** `tests/test_graph_api.py`, lines 353–380. The test `test_graph_includes_proposed_components` creates a component with `status="proposed"` and asserts it appears in the response.
+
+### 4.2 Graph Response Provenance
+
+**Implemented:** Graph components include:
+- `source_type`
+- `source_url`
+- `ingested_at`
+
+**Evidence:** `app/api/graph.py`, lines 39–41 (ComponentRead schema) and lines 128–130 (response construction).
+
+**Evidence:** `tests/test_graph_api.py`, lines 11–70. Tests assert `source_type`, `source_url`, and `ingested_at` are present.
+
+### 4.3 Relationships Include Confidence and Evidence
+
+**Implemented:** Graph relationships include `confidence` and `evidence`.
+
+**Evidence:** `app/api/graph.py`, lines 51–52 (RelationshipRead schema) and lines 136–137 (response construction).
+
+**Evidence:** `tests/test_graph_api.py`, lines 72–103. Test asserts `confidence == 0.85` and `evidence == "'A' depends_on 'B'"`.
+
+---
+
+## 5. SQLite Schema Migration / Backfill
+
+### 5.1 Startup Migration Runs
+
+**Implemented:** On application startup, `Base.metadata.create_all()` runs first, then `run_migrations()` executes.
+
+**Evidence:** `app/main.py`, lines 18–23. The lifespan context manager calls `create_all` and then `run_migrations`.
+
+**Evidence:** `app/migrations.py`, lines 7–8. `run_migrations` delegates to `_migrate_relationships_confidence_evidence`.
+
+### 5.2 Relationships Table Migration
+
+**Implemented:** The migration adds `confidence` and `evidence` columns to the `relationships` table if missing, and backfills null values.
+
+**Evidence:** `app/migrations.py`, lines 11–32. The function:
+- No-ops if the table does not exist (detected via empty column set).
+- Adds `confidence FLOAT NOT NULL DEFAULT 0.7` if missing.
+- Adds `evidence TEXT` if missing.
+- Backfills `confidence = 0.7` and `evidence = 'backfill: schema migration'` for null rows.
+
+**Not implemented yet:** Alembic-based migration management. The current approach is a lightweight startup guard suitable for local SQLite deployments.
+
+---
+
+## 6. Relationship Rules
+
+### 6.1 Cross-Model Relationships
+
+**Implemented:** The ingestion service resolves relationship targets across all models, not just the source component's model.
+
+**Evidence:** `app/services/ingest.py`, lines 111–126. The first query searches by `Component.name` across all models, ordered by confidence. A fallback query restricts to the same model.
+
+**Evidence:** `tests/test_ingestion.py`, lines 13–65. `test_creates_cross_model_relationship` verifies a Pricing component can link to a Security component.
+
+### 6.2 Confidence Threshold
+
+**Implemented:** Relationships are skipped if extractor confidence is below `0.6`.
+
+**Evidence:** `app/services/ingest.py`, lines 103–105.
+
+**Evidence:** `tests/test_ingestion.py`, lines 109–146. `test_skips_low_confidence_relationship` asserts no row is created for `confidence=0.45`.
+
+### 6.3 Duplicate and Self-Loop Prevention
+
+**Implemented:** Duplicate relationships (same source, target, and type) and self-loops are rejected.
+
+**Evidence:** `app/services/ingest.py`, lines 131–139 (duplicate check) and line 114 (self-loop check via `Component.id != source.id`).
+
+**Evidence:** `tests/test_ingestion.py`, lines 187–261.
+
+---
+
+## 7. Frontend/Backend Catalog Alignment
+
+### 7.1 Frontend-Only Connector Types
+
+**Observed:** The frontend `CONNECTOR_CATALOG` in `hooks.js` (lines 73-154) includes three types that are not in the backend catalog (`app/api/connectors.py` lines 19-85):
+- `zoom` — `coming_soon`, no backend entry
+- `gdrive` — `coming_soon`, no backend entry
+- `wispr_flow` — `coming_soon`, no backend entry
+
+**Behavior:** `normalizeConnectors` (hooks.js line 1774) iterates over `CONNECTOR_CATALOG` values. For types without a backend record, it returns `status: "coming_soon"` and `connectorId: null`. These render in the UI but cannot connect or sync.
+
+### 7.2 Backend-Only Connector Types
+
+The backend has no types that the frontend omits. All 5 backend types appear in the frontend catalog.
+
+### 7.3 Frontend Hooks Without Backend Endpoints
+
+**Observed:** `hooks.js` defines mutation hooks that POST to endpoints that do not exist in `app/api/connectors.py`:
+- `useConnectNotion` → `POST /connectors/notion/connect` (line 1604)
+- `useConnectZoom` → `POST /connectors/zoom/connect` (line 1620)
+- `useConnectGitHub` → `POST /connectors/github/connect` (line 1636)
+- `useSaveSlackOAuthSettings` → `POST /connectors/slack/oauth-settings` (line 1654)
+
+**Risk:** If these hooks are called from the UI, they will fail with 404 or 405. The hooks do not have fallback mock behavior — errors propagate to the caller.
+
+### 7.4 Slack Availability Inconsistency
+
+**Observed:** The backend catalog sets Slack to `"availability": "available"` but `"supported": False` (line 30). This means:
+- `GET /connectors` returns Slack with `availability: "available"` and `status: "disconnected"`
+- `POST /connectors/slack/connect` returns 400 because `supported` is False
+- The frontend shows Slack as "available" in the connector card
+
+**Compare with Discord:** Discord uses `"availability": "coming_soon"` and `"supported": False` (line 38). The UI correctly shows Discord as "coming soon".
+
+**Recommendation:** Change Slack's `availability` to `"coming_soon"` to match Discord's honest pattern, or add a distinct `supported` check in the frontend before showing the connect button.
+
+---
+
+## 8. Not Implemented Yet
+
+- **Slack OAuth install/callback and Slack API sync.** No OAuth handshake, no Slack client, no real sync worker.
+- **Discord API sync.** Catalogued as `coming_soon`.
+- **Gmail OAuth and mailbox sync.** Catalogued as `coming_soon`.
+- **Zoom, Google Drive, Notion, GitHub, and Wispr provider backends.** Not in backend catalog.
+- **Notion connect endpoint.** Frontend hook exists (`useConnectNotion`) but no backend endpoint.
+- **Zoom connect endpoint.** Frontend hook exists (`useConnectZoom`) but no backend endpoint.
+- **GitHub connect endpoint.** Frontend hook exists (`useConnectGitHub`) but no backend endpoint.
+- **Slack OAuth settings endpoint.** Frontend hook exists (`useSaveSlackOAuthSettings`) but no backend endpoint.
+- **Alembic-based production migration management.** Current migrations are lightweight startup guards.
+- **Dedicated frontend AI Context import form.** The backend endpoint exists; the frontend relies on the generic Sources workflow or manual API calls.
+
+---
+
+## 9. Verification
+
+### 9.1 Test Commands
 
 ```bash
 pytest -q
 cd frontend && npm run build
 ```
 
-Latest verified result:
+### 9.2 Latest Verified Result (2026-05-01)
 
-- `pytest -q`: 99 passed
-- `npm run build`: passed
+- `pytest -q`: **99 passed**
+- `npm run build`: **passed**
 
+### 9.3 Evidence Files Used
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `app/api/connectors.py` | 19–85 | Connector catalog |
+| `app/api/connectors.py` | 363–421 | `GET /connectors` response shape |
+| `app/api/connectors.py` | 437–443 | AI context subtype grouping |
+| `app/api/connectors.py` | 472–531 | AI context import endpoint |
+| `app/api/connectors.py` | 553–557 | Slack connect rejection |
+| `app/api/connectors.py` | 605–617 | Slack sync failure |
+| `app/api/graph.py` | 78 | Graph status filter includes `proposed` |
+| `app/api/graph.py` | 128–130 | Component provenance fields |
+| `app/api/graph.py` | 136–137 | Relationship confidence/evidence |
+| `app/migrations.py` | 11–32 | Relationships column migration |
+| `app/main.py` | 18–23 | Startup lifecycle |
+| `app/services/ingest.py` | 103–139 | Relationship creation rules |
+| `tests/test_connectors.py` | 73–100 | Connector list shape tests |
+| `tests/test_connectors.py` | 166–199 | Setup status tests |
+| `tests/test_connectors.py` | 202–208 | Slack connect rejection test |
+| `tests/test_connectors.py` | 523–560 | AI context subtype grouping test |
+| `tests/test_connectors.py` | 610–636 | Slack unsupported tests |
+| `tests/test_graph_api.py` | 11–103 | Graph provenance tests |
+| `tests/test_graph_api.py` | 353–380 | Proposed visibility test |
+| `tests/test_ingestion.py` | 13–146 | Cross-model and confidence tests |
