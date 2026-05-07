@@ -1,67 +1,152 @@
-# Qwen Task
+# Qwen 3.6 Task
 
-## Role
+## Coding Capability Rank
 
-You are the graph reasoning checker, schema compatibility reviewer, and hard bug solver.
+4 of 5.
 
-Work in this repo:
+Qwen is a senior schema, API, display, and integration engineer for this round. Use it for graph data modeling, display-readiness, API contracts, and cross-surface consistency.
 
-```text
-/Users/darshann/Desktop/context-engine
-```
+## Branch
 
-Preferred branch:
+`agent/qwen-graph-display-api`
 
-```bash
-agent/qwen-graph-reasoning-validation
-```
+## Mission
 
-## Focus
+Engineer the knowledge display layer for models, components, and relationships so GitHub issues/PRs and AI markdown sessions are understandable in the product.
 
-- Relationship extraction and relationship creation must be conservative and evidence-based.
-- Graph APIs must expose current, review-needed, and future/proposed context.
-- Existing local SQLite databases must remain usable after schema additions.
-- MCP/query behavior should preserve useful provenance.
-- The graph must help users understand what needs to be done now, what was decided in the past, and what is proposed for the future.
+Do not work on connector availability or provider OAuth.
 
-## Required Workload
+## Current Repo Facts To Verify First
 
-1. Add adversarial graph tests for relationship hallucination:
-   - unrelated components in the same source must not get relationship edges;
-   - weak semantic similarity alone must not create edges;
-   - explicit relationship wording should create an edge with evidence.
-2. Add or verify temporal context tests:
-   - future/planned/proposed facts appear as `proposed`;
-   - deprecated/past facts appear as review-needed or otherwise do not overwrite active truth silently;
-   - graph stats count proposed components.
-3. Verify migration safety:
-   - existing SQLite relationship tables missing `confidence` and `evidence` are upgraded;
-   - migration is idempotent.
-4. Review source provenance:
-   - components returned by graph include source type/URL/ingested timestamp when available;
-   - relationships include confidence and evidence when available.
-5. Review MCP/query surface if relevant:
-   - graph/query responses should not strip provenance in ways that make evidence impossible to inspect.
+- `frontend/src/pages/GraphView.jsx` is the main graph screen.
+- `frontend/src/api/hooks.js` and `frontend/src/api/client.js` define data access patterns.
+- `app/api/graph.py` exposes graph data.
+- `app/api/models_api.py` exposes model-specific data.
+- `app/models.py` and `app/taxonomy.py` define persisted graph semantics.
 
-## Read First
+If the current frontend graph has moved, report the actual files.
 
-- `AGENTS.md`
-- `TASK_PLAN.md`
-- `app/models.py`
-- `app/migrations.py`
-- `app/processing/extractor.py`
-- `app/services/ingest.py`
-- `app/api/graph.py`
-- `app/mcp/server.py`
-- `tests/test_migrations.py`
-- `tests/test_graph_api.py`
-- `tests/test_ingestion.py`
+## 10x Workload
+
+### 1. Display Data Contract
+
+Make the backend/frontend contract explicit for graph display:
+
+- component display title;
+- model name;
+- component/fact type;
+- source type;
+- source ID/URL;
+- temporal state;
+- status;
+- confidence;
+- evidence excerpt;
+- metadata summary;
+- relationship count;
+- inbound/outbound relationship counts.
+
+For relationships:
+
+- source node;
+- target node;
+- type;
+- display label;
+- confidence;
+- evidence;
+- status;
+- origin: deterministic, extracted, AI-proposed, human-verified if available.
+
+### 2. Knowledge Display Modes
+
+Design and implement, or prepare implementation-ready specs for:
+
+- model overview;
+- component table/inspector;
+- relationship table/inspector;
+- source-to-knowledge diff;
+- work lens: blockers, open decisions, active tasks, unresolved questions;
+- graph canvas with filters;
+- context-pack selection lens.
+
+The table/inspector view should be treated as first-class because it is easier to debug than a graph canvas.
+
+### 3. Graph UI Behavior
+
+Ensure the UI can show:
+
+- GitHub issue nodes;
+- GitHub PR nodes;
+- changed file/module nodes;
+- AI session nodes;
+- extracted task/decision/risk nodes;
+- deterministic edges as solid;
+- proposed/candidate edges as dashed or visually secondary;
+- low-confidence edges hidden by default;
+- selected edge evidence in a side panel.
+
+### 4. Filtering and Search
+
+Add or specify filters for:
+
+- source type: GitHub issue, GitHub PR, AI markdown session, local file, docs;
+- model;
+- component type;
+- relationship type;
+- relationship status;
+- confidence threshold;
+- temporal;
+- source document.
+
+### 5. Source-to-Knowledge Diff
+
+Implement or specify a view that answers:
+
+- What did this source add?
+- Which models changed?
+- Which components were created?
+- Which relationships were created?
+- Which edges are proposed/candidate?
+- Which components are duplicates or updates?
+- What evidence backs each item?
+
+This is the trust-building workflow for newly imported GitHub and AI-session sources.
+
+### 6. API and State Management
+
+If existing `/api/graph` is too broad, add or specify:
+
+- graph slice endpoint;
+- source diff endpoint;
+- component detail endpoint;
+- relationship detail endpoint;
+- work lens endpoint;
+- context-pack input endpoint.
+
+Reuse existing FastAPI/Pydantic and React Query patterns.
+
+### 7. Verification
+
+Run:
+
+- `npm run build` if frontend files change;
+- relevant backend tests if API files change;
+- `pytest -q` if backend graph contracts change broadly.
+
+## Deliverables
+
+Final report must include:
+
+- files changed;
+- display/API contracts added;
+- screenshots or payload examples if practical;
+- frontend build result;
+- backend test result if applicable;
+- unresolved UX/data risks.
 
 ## Rules
 
-- Do not implement provider OAuth.
-- Do not edit connector UI unless a graph contract requires it.
-- Do not create inferred relationships from weak semantic similarity alone.
-- Add tests for any graph/schema behavior change.
-- If behavior is already correct, add or improve tests/docs instead of changing logic unnecessarily.
-- Final report must include files changed, tests run, evidence, risks, and unresolved gaps.
+- No connector/OAuth work.
+- Do not hide missing data with vague UI copy.
+- Do not make unsupported relationship claims in display text.
+- Display provenance and evidence close to every selected node/edge.
+- Prefer dense, debuggable engineering UI over marketing-style graph visuals.

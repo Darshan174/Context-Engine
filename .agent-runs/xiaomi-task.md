@@ -1,57 +1,131 @@
-# Xiaomi MiMo V2.5 Pro Task
+# MiMo V2.5 Task
 
-## Role
+## Coding Capability Rank
 
-You are the long-context repo reader, documentation reviewer, UX reviewer, and OSS readiness reviewer.
+5 of 5.
 
-Work in this repo:
+MiMo is a senior long-context repo reviewer, documentation reviewer, UX reviewer, and readiness evaluator. Use it after implementation to find stale claims, missing evidence, weak product logic, and documentation drift.
 
-```text
-/Users/darshann/Desktop/context-engine
-```
+## Branch
 
-Preferred branch:
+`agent/mimo-knowledge-graph-review`
 
-```bash
-agent/xiaomi-repo-review-docs
-```
+## Mission
 
-## Focus
+Review the 10x knowledge-graph engineering work after Kimi, GLM, DeepSeek, and Qwen. The goal is to decide whether Context Engine now behaves like a credible engineering memory system for GitHub issues/PRs and AI markdown sessions.
 
-Keep public docs, review docs, and OSS onboarding honest.
+Do not work on connector availability or provider OAuth.
 
-Review for:
+## Current Repo Facts To Verify First
 
-- stale claims after implementation changes;
-- connector claims that overstate support;
-- frontend/backend catalog mismatch;
-- broken onboarding commands;
-- missing tests, CI, license, or contributor docs;
-- graph provenance and relationship clarity.
+- Read `README.md`, `project.md`, `TASK_PLAN.md`, `AGENTS.md`, and `docs/`.
+- Read `app/models.py`, `app/taxonomy.py`, `app/processing/extractor.py`, `app/services/ingest.py`, `app/api/graph.py`, `app/api/models_api.py`, and `app/agents/`.
+- Read `frontend/src/pages/GraphView.jsx` and relevant API hooks.
+- Read all tests touched by GLM, DeepSeek, and Qwen.
 
-## Required Workload
+Do not trust prior reports without checking files.
 
-1. Fix the latest Codex doc findings:
-   - `docs/oss-readiness.md` must not say backend catalog has only five connector types if code now has eight catalog entries.
-   - `docs/connectors-graph-contract.md` must not say Zoom/GDrive/Wispr are absent from the backend catalog.
-   - update the stale `pytest -q` result from 99 passed to the latest verified count after tests are rerun.
-2. Refresh public docs for OSS contributors:
-   - README/project docs should accurately describe the six current tables;
-   - connector docs should explain real ingestion vs catalogued coming-soon stubs;
-   - AI Context docs should explain local storage and source provenance clearly.
-3. Add or update an OSS readiness checklist:
-   - install/bootstrap command;
-   - backend test command;
-   - frontend build/test command;
-   - known unsupported providers;
-   - current launch blockers.
-4. Review UI wording for connector honesty:
-   - no provider should be described as seamless/connected unless there is a tested flow;
-   - coming-soon providers should tell contributors what is missing.
-5. Final review pass:
-   - search for stale phrases such as old test counts, old table counts, and unsupported-provider overclaims;
-   - report exact files/lines for anything left unfixed.
+## 10x Workload
 
-## Final Report
+### 1. Product Readiness Review
 
-Include files changed, tests/docs reviewed, stale claims removed, top findings by severity, OSS readiness score, and remaining launch blockers.
+Evaluate whether the product now answers the real user questions:
+
+- What changed recently?
+- What is blocked?
+- Which PRs implement which decisions?
+- Which issues are resolved by which PRs?
+- Which AI sessions produced useful decisions/tasks/risks?
+- Which relationships are evidence-backed?
+- What context pack should another coding agent receive?
+
+### 2. Documentation Truth Review
+
+Find and fix stale or overbroad docs:
+
+- README claims about graph capabilities;
+- project docs about current status;
+- task plans that still emphasize connector work;
+- graph contract docs that do not match code;
+- agent docs that overclaim relationship inference;
+- setup/test instructions that no longer match reality.
+
+### 3. UX Review
+
+Review graph display from an engineering-user perspective:
+
+- Can a user inspect node provenance quickly?
+- Can a user inspect edge evidence quickly?
+- Are candidate/proposed edges visually distinct?
+- Are low-confidence edges hidden or clearly marked?
+- Does the source-to-knowledge diff make imports understandable?
+- Does the UI support GitHub and AI-session source types clearly?
+- Does the graph avoid decorative complexity?
+
+### 4. AI Agent Function Review
+
+Review whether the in-project AI agents are functioning:
+
+- GraphBuilderAgent;
+- GapDetectorAgent;
+- RelationshipAgent;
+- ContextPackAgent;
+- API wrappers under `/api/agents/*`;
+- graph build API under `/api/graph/build`.
+
+Classify each as:
+
+- functioning;
+- partially functioning;
+- blocked;
+- untested.
+
+Ground every classification in code/tests.
+
+### 5. Test and Evidence Review
+
+Verify:
+
+- backend tests cover GitHub and AI-session graph extraction;
+- adversarial relationship tests exist;
+- graph API tests include display metadata;
+- migration tests cover new fields;
+- frontend build passes if frontend changed;
+- docs cite true behavior only.
+
+### 6. Final Readiness Score
+
+Produce:
+
+- readiness score out of 10;
+- launch blockers;
+- serious risks;
+- polish issues;
+- exact files/areas requiring Codex final review.
+
+## Required Commands
+
+Run:
+
+- `pytest -q`
+- `npm run build` if frontend changed or if display behavior is under review.
+
+## Deliverables
+
+Final report must include:
+
+- files read;
+- files changed;
+- evidence-backed findings by severity;
+- docs corrected;
+- tests/build run;
+- readiness score;
+- merge/no-merge recommendation.
+
+## Rules
+
+- No connector/OAuth work.
+- No unsupported claims.
+- No vague product advice without code evidence.
+- Do not rewrite implementation unless a small doc/code fix is necessary.
+- Keep review findings actionable and file-grounded.

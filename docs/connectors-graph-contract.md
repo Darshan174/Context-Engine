@@ -45,9 +45,9 @@ Branch: `agent/xiaomi-repo-review-docs`
 - `status` (string: `available`, `coming_soon`, `disconnected`, etc.)
 - `availability`, `auth_mode`
 
-**Evidence:** `app/api/connectors.py`, lines 424–429 and 327–360.
+**Evidence:** `app/api/connectors.py`, lines 462–467 and 366–399.
 
-**Evidence:** `tests/test_connectors.py`, lines 166–199.
+**Evidence:** `tests/test_connectors.py`, lines 180–210.
 
 ---
 
@@ -60,7 +60,7 @@ Branch: `agent/xiaomi-repo-review-docs`
 - `content` (required)
 - `author`, `tool`, `session_type`, `session_id`, `started_at`, `ended_at`, `metadata` (optional)
 
-**Evidence:** `app/api/connectors.py`, lines 472–531.
+**Evidence:** `app/api/connectors.py`, lines 513–573.
 
 ### 2.2 Tool-to-Source-Type Mapping
 
@@ -70,15 +70,15 @@ Branch: `agent/xiaomi-repo-review-docs`
 - `opencode` → `ai_context_opencode`
 - `cursor`, `generic`, or unknown → `ai_context`
 
-**Evidence:** `app/api/connectors.py`, lines 487–493.
+**Evidence:** `app/api/connectors.py`, lines 529–535.
 
 ### 2.3 Processing Summary Groups AI Context Subtypes
 
 **Implemented:** `GET /api/connectors/processing-summary` counts all AI context subtypes under the single `ai_context` bucket.
 
-**Evidence:** `app/api/connectors.py`, lines 437–443. The `all_types` dict maps `ai_context` to the list `["ai_context", "ai_context_codex", "ai_context_claude_code", "ai_context_opencode"]`. The query groups by the literal `source_type`, then Python sums the counts for all subtypes into the `ai_context` display bucket.
+**Evidence:** `app/api/connectors.py`, lines 475–484. The `all_types` dict maps `ai_context` to the list `["ai_context", "ai_context_codex", "ai_context_claude_code", "ai_context_opencode"]`. The query groups by the literal `source_type`, then Python sums the counts for all subtypes into the `ai_context` display bucket.
 
-**Evidence:** `tests/test_connectors.py`, lines 523–560. The test `test_processing_summary_counts_ai_context_subtypes_together` creates documents with all four subtypes and asserts the summary returns `total_documents >= 4` for `ai_context`.
+**Evidence:** `tests/test_connectors.py`, lines 553–590. The test `test_processing_summary_counts_ai_context_subtypes_together` creates documents with all four subtypes and asserts the summary returns `total_documents >= 4` for `ai_context`.
 
 ---
 
@@ -88,27 +88,27 @@ Branch: `agent/xiaomi-repo-review-docs`
 
 **Implemented:** `POST /connectors/slack/connect` returns `400` because Slack has `"supported": False` in the catalog.
 
-**Evidence:** `app/api/connectors.py`, lines 553–557. The handler checks `if not catalog_entry.get("supported", True)` and raises `HTTPException(status_code=400)`.
+**Evidence:** `app/api/connectors.py`, lines 594–598. The handler checks `if not catalog_entry.get("supported", True)` and raises `HTTPException(status_code=400)`.
 
-**Evidence:** `tests/test_connectors.py`, lines 202–208. The test `test_connect_slack_returns_400_unsupported` asserts status code `400` and checks the detail message.
+**Evidence:** `tests/test_connectors.py`, lines 211–218. The test `test_connect_slack_returns_400_unsupported` asserts status code `400` and checks the detail message.
 
-**Evidence:** `tests/test_connectors.py`, lines 629–636. The test `test_slack_connect_returns_400_unsupported` also asserts `400`.
+**Evidence:** `tests/test_connectors.py`, lines 658–665. The test `test_slack_connect_returns_400_unsupported` also asserts `400`.
 
 ### 3.2 Slack Sync Returns Failed Job
 
 **Implemented:** If a Slack connector row exists and a sync is triggered, the sync endpoint creates a `SyncJob` with `status="failed"`, `error_type="unsupported_connector"`.
 
-**Evidence:** `app/api/connectors.py`, lines 605–617.
+**Evidence:** `app/api/connectors.py`, lines 640–653.
 
-**Evidence:** `tests/test_connectors.py`, lines 610–627. The test `test_slack_sync_returns_unsupported_error` asserts `status == "failed"` and `error_type == "unsupported_connector"`.
+**Evidence:** `tests/test_connectors.py`, lines 639–656. The test `test_slack_sync_returns_unsupported_error` asserts `status == "failed"` and `error_type == "unsupported_connector"`.
 
 ### 3.3 Discord and Gmail Are Coming Soon
 
 **Implemented:** Discord and Gmail have `"availability": "coming_soon"` and `"supported": False`. Their connect endpoints return `400`.
 
-**Evidence:** `app/api/connectors.py`, lines 34–57 (catalog entries).
+**Evidence:** `app/api/connectors.py`, lines 33–124 (catalog entries).
 
-**Evidence:** `tests/test_connectors.py`, lines 217–229.
+**Evidence:** `tests/test_connectors.py`, lines 219–238.
 
 ---
 
@@ -197,28 +197,25 @@ Branch: `agent/xiaomi-repo-review-docs`
 
 ## 7. Frontend/Backend Catalog Alignment
 
-### 7.1 Frontend-Only Connector Types
+### 7.1 Frontend/Backend Catalog Alignment
 
-**Observed:** The frontend `CONNECTOR_CATALOG` in `hooks.js` (lines 73-154) includes three types that are not in the backend catalog (`app/api/connectors.py` lines 19-85):
-- `zoom` — `coming_soon`, no backend entry
-- `gdrive` — `coming_soon`, no backend entry
-- `wispr_flow` — `coming_soon`, no backend entry
+**Implemented:** The frontend `CONNECTOR_CATALOG` in `hooks.js` (lines 73-154) and the backend `CONNECTOR_CATALOG` in `app/api/connectors.py` (lines 19-124) are now aligned. Both include 8 types: `slack`, `discord`, `ai_context`, `local`, `zoom`, `gdrive`, `gmail`, `wispr_flow`.
 
-**Behavior:** `normalizeConnectors` (hooks.js line 1774) iterates over `CONNECTOR_CATALOG` values. For types without a backend record, it returns `status: "coming_soon"` and `connectorId: null`. These render in the UI but cannot connect or sync.
+**Behavior:** `normalizeConnectors` (hooks.js line 1774) iterates over `CONNECTOR_CATALOG` values. For types with a backend record, it uses the backend data. For types without a backend record, it returns `status: "coming_soon"` and `connectorId: null`.
 
 ### 7.2 Backend-Only Connector Types
 
-The backend has no types that the frontend omits. All 5 backend types appear in the frontend catalog.
+The backend has no types that the frontend omits. All 8 backend types appear in the frontend catalog.
 
-### 7.3 Frontend Hooks Without Backend Endpoints
+### 7.3 Frontend Hooks Without Working Backend Paths
 
-**Observed:** `hooks.js` defines mutation hooks that POST to endpoints that do not exist in `app/api/connectors.py`:
-- `useConnectNotion` → `POST /connectors/notion/connect` (line 1604)
-- `useConnectZoom` → `POST /connectors/zoom/connect` (line 1620)
-- `useConnectGitHub` → `POST /connectors/github/connect` (line 1636)
-- `useSaveSlackOAuthSettings` → `POST /connectors/slack/oauth-settings` (line 1654)
+**Observed:** `hooks.js` defines mutation hooks for provider setup paths that are not implemented as working integrations:
+- `useConnectNotion` → `POST /connectors/notion/connect` (line 1604). The generic connect route exists, but `notion` is not in the backend catalog, so this returns 404 unknown connector type.
+- `useConnectZoom` → `POST /connectors/zoom/connect` (line 1620). The generic connect route exists and `zoom` is catalogued, so this returns 400 coming soon.
+- `useConnectGitHub` → `POST /connectors/github/connect` (line 1636). The generic connect route exists, but `github` is not in the backend catalog, so this returns 404 unknown connector type.
+- `useSaveSlackOAuthSettings` → `POST /connectors/slack/oauth-settings` (line 1654). No backend route exists for this settings endpoint.
 
-**Risk:** If these hooks are called from the UI, they will fail with 404 or 405. The hooks do not have fallback mock behavior — errors propagate to the caller.
+**Risk:** If these hooks are called from reachable UI paths, Notion/GitHub/Slack settings will fail as missing or unknown, and Zoom will fail as an intentional coming-soon stub. The hooks do not have fallback mock behavior, so errors propagate to the caller.
 
 ### 7.4 Slack Availability Inconsistency
 
@@ -238,10 +235,10 @@ The backend has no types that the frontend omits. All 5 backend types appear in 
 - **Slack OAuth install/callback and Slack API sync.** No OAuth handshake, no Slack client, no real sync worker.
 - **Discord API sync.** Catalogued as `coming_soon`.
 - **Gmail OAuth and mailbox sync.** Catalogued as `coming_soon`.
-- **Zoom, Google Drive, Notion, GitHub, and Wispr provider backends.** Not in backend catalog.
-- **Notion connect endpoint.** Frontend hook exists (`useConnectNotion`) but no backend endpoint.
-- **Zoom connect endpoint.** Frontend hook exists (`useConnectZoom`) but no backend endpoint.
-- **GitHub connect endpoint.** Frontend hook exists (`useConnectGitHub`) but no backend endpoint.
+- **Zoom, Google Drive, Gmail, and Wispr provider backends.** Catalog entries exist in backend, but no sync logic.
+- **Notion and GitHub catalog entries/provider backends.** Frontend hooks exist, but these connector types are not catalogued in the backend.
+- **Zoom provider sync.** Frontend hook exists and the generic backend connect route handles it as a catalogued `coming_soon` connector, but no working sync path exists.
+- **GitHub connect behavior.** Frontend hook exists (`useConnectGitHub`), but the backend currently treats `github` as an unknown connector type.
 - **Slack OAuth settings endpoint.** Frontend hook exists (`useSaveSlackOAuthSettings`) but no backend endpoint.
 - **Alembic-based production migration management.** Current migrations are lightweight startup guards.
 - **Dedicated frontend AI Context import form.** The backend endpoint exists; the frontend relies on the generic Sources workflow or manual API calls.
@@ -259,30 +256,31 @@ cd frontend && npm run build
 
 ### 9.2 Latest Verified Result (2026-05-01)
 
-- `pytest -q`: **99 passed**
+- `pytest -q`: **107 passed**
 - `npm run build`: **passed**
 
 ### 9.3 Evidence Files Used
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `app/api/connectors.py` | 19–85 | Connector catalog |
-| `app/api/connectors.py` | 363–421 | `GET /connectors` response shape |
-| `app/api/connectors.py` | 437–443 | AI context subtype grouping |
-| `app/api/connectors.py` | 472–531 | AI context import endpoint |
-| `app/api/connectors.py` | 553–557 | Slack connect rejection |
-| `app/api/connectors.py` | 605–617 | Slack sync failure |
+| `app/api/connectors.py` | 19–124 | Connector catalog |
+| `app/api/connectors.py` | 402–460 | `GET /connectors` response shape |
+| `app/api/connectors.py` | 475–484 | AI context subtype grouping |
+| `app/api/connectors.py` | 513–573 | AI context import endpoint |
+| `app/api/connectors.py` | 594–598 | Slack connect rejection |
+| `app/api/connectors.py` | 640–653 | Slack sync failure |
 | `app/api/graph.py` | 78 | Graph status filter includes `proposed` |
 | `app/api/graph.py` | 128–130 | Component provenance fields |
 | `app/api/graph.py` | 136–137 | Relationship confidence/evidence |
 | `app/migrations.py` | 11–32 | Relationships column migration |
 | `app/main.py` | 18–23 | Startup lifecycle |
 | `app/services/ingest.py` | 103–139 | Relationship creation rules |
-| `tests/test_connectors.py` | 73–100 | Connector list shape tests |
-| `tests/test_connectors.py` | 166–199 | Setup status tests |
-| `tests/test_connectors.py` | 202–208 | Slack connect rejection test |
-| `tests/test_connectors.py` | 523–560 | AI context subtype grouping test |
-| `tests/test_connectors.py` | 610–636 | Slack unsupported tests |
+| `tests/test_connectors.py` | 73–112 | Connector list shape tests |
+| `tests/test_connectors.py` | 180–210 | Setup status tests |
+| `tests/test_connectors.py` | 211–218 | Slack connect rejection test |
+| `tests/test_connectors.py` | 553–590 | AI context subtype grouping test |
+| `tests/test_connectors.py` | 639–665 | Slack unsupported tests |
 | `tests/test_graph_api.py` | 11–103 | Graph provenance tests |
-| `tests/test_graph_api.py` | 353–380 | Proposed visibility test |
-| `tests/test_ingestion.py` | 13–146 | Cross-model and confidence tests |
+| `tests/test_graph_api.py` | 377–406 | Proposed visibility test |
+| `tests/test_ingestion.py` | 14–65 | Cross-model relationship tests |
+| `tests/test_ingestion.py` | 110–146 | Confidence threshold tests |
