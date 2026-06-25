@@ -6,6 +6,13 @@
 > **Agent:** Kimi K2.6  
 > **Date:** 2026-05-04
 
+> **Current status note, refreshed 2026-06-18:** This is a historical contract
+> review, not launch copy. Several proposed items below are now implemented:
+> relationship `origin`, component `provenance`/`excerpt`, deterministic GitHub
+> issue/PR extraction, deterministic agent-session extraction, evidence-backed
+> inferred relationships, Board/Explore graph UX, Work/Gaps lens presets, and
+> selection-scoped context packs.
+
 ---
 
 ## 1. Observed Current Behavior (with evidence)
@@ -19,9 +26,12 @@
 - `Component` — atomic fact with `model_id`, `source_document_id`, `name`, `value`, `fact_type`, `temporal`, `confidence`, `authority_weight`, `embedding`, `status`, `valid_from`, `valid_to`, `superseded_by_id`.
 - `Relationship` — directed edge with `source_component_id`, `target_component_id`, `relationship_type`, `confidence`, `evidence`, `status`.
 
-**Gap:** The `Component` table does **not** store `source_url` or `source_external_id` directly; it must be joined through `source_document`. There is no `evidence_excerpt` column on the component itself.
+**Current status:** The `Component` table still derives `source_url` and
+`source_external_id` through `source_document`, but it now stores component-level
+`provenance` and `excerpt` fields for extracted evidence.
 
-**Observed:** `Relationship.status` defaults to `"active"` (line 181). The taxonomy and ingestion code also use `"proposed"` and `"needs_review"`, but `"rejected"` is not yet a stored value anywhere in the pipeline.
+**Current status:** `Relationship` now stores `origin` and the graph UI can
+approve/reject proposed relationships through the review endpoint.
 
 ### 1.2 Taxonomy
 
@@ -31,7 +41,9 @@
 - `_MODEL_ALIASES` — maps plural and lowercase inputs to canonical names.
 - `VALID_RELATIONSHIP_TYPES` — 16 types: `assigned_to`, `blocked_by`, `blocks`, `caused_by`, `co_occurs`, `confirms`, `contains`, `contradicts`, `created_from`, `decides`, `depends_on`, `discussed_in`, `duplicates`, `enables`, `generated_by_agent`, `implemented_in`, `mentions`, `owned_by`, `part_of`, `related_to`, `solves`, `supersedes`, `verified_by_human`.
 
-**Gap:** The task requires `implements`, `fixes`, `resolved_by`, `conflicts_with`, `touches_file`, and `verified_by_human` is present but not used in extraction prompts. `fixes` and `resolved_by` are missing entirely from `VALID_RELATIONSHIP_TYPES`.
+**Current status:** `VALID_RELATIONSHIP_TYPES` now includes `implements`,
+`fixes`, `resolved_by`, `conflicts_with`, `touches_file`, and
+`verified_by_human`.
 
 ### 1.3 Extraction
 
@@ -55,7 +67,8 @@
 
 **Evidence:** `tests/test_ingestion.py` covers cross-model relationships (lines 13–65), confidence thresholds (lines 109–146), duplicate/self-loop prevention (lines 187–261), temporal status mapping (lines 264–320), and relationship evidence storage (lines 418–496).
 
-**Gap:** `_create_relationship` does **not** distinguish deterministic vs AI-suggested origin. There is no `origin` field on `Relationship`.
+**Current status:** `Relationship.origin` is present and ingestion sets
+deterministic/extracted/proposed origins through `canonical_origin()`.
 
 ### 1.5 Graph API
 
@@ -73,9 +86,12 @@
 
 ### 1.6 Cross-Document Inference
 
-**Observed:** `app/agents/graph_builder.py` (`_infer_cross_doc_relationships`, lines 104–147) scans component values for names of other components and creates `related_to` edges when found. These edges have **no evidence** field populated (defaults to `None`).
+**Current status:** `app/agents/graph_builder.py` scans component values for
+names of other components and creates review-oriented `related_to` candidates
+when found across documents.
 
-**Gap:** This produces relationships with `evidence = None` and `confidence = 0.7` (default). The task contract forbids relationships with no evidence.
+**Current status:** Cross-document inference now writes review-oriented
+evidence and `origin = "ai_proposed"` for candidate relationships.
 
 ### 1.7 AI Agents
 
@@ -101,7 +117,9 @@
 - Edge labels reveal on hover/selection (lines 706–719).
 - Agents sidebar panel with Gap Detector, Relationship Agent, Context Pack (lines 1392–1651).
 
-**Gap:** No "source-to-knowledge diff" view. No dedicated "work lens" (blockers, open decisions, unresolved questions) separate from the graph canvas. No "context-pack from selection" (context pack is always full-graph).
+**Current status:** Board is the default graph mode, Explore is available for
+local connection traversal, lens presets include work/gaps-style filters, and
+context packs can be generated from the selected component plus 1-hop neighbors.
 
 ---
 
@@ -156,7 +174,9 @@ Each component **must** carry a `fact_type` drawn from this vocabulary:
 | `meeting_note` | Meeting outcome or note | `Meeting` |
 | `ai_step` | AI session step or attempt | `Agent Session` |
 
-**Gap:** The current `fact_type` column is a free `String(50)` with no constraint. The extractor prompt lists `decision | task | blocker | risk | metric | feature | meeting_note | ai_step | fact` (line 66).
+**Current status:** The `fact_type` column is still a `String(50)`, but
+`app/taxonomy.py` now defines `VALID_FACT_TYPES` and helper normalization for
+extractors/API code.
 
 #### 2.1.3 Required Component Fields
 
@@ -170,7 +190,8 @@ Every component row **must** populate:
 | `source_document_id` | Ingestion service | FK to `source_documents`. |
 | `source_type` | Derived from `SourceDocument.source_type` | Must be present in API response (observed). |
 | `source_url` | Derived from `SourceDocument.source_url` | Must be present in API response (observed). |
-| `evidence_excerpt` | **Proposed new field** | 500-char max direct quote from source that justifies this component. |
+| `excerpt` | Implemented field | Source quote or compact evidence excerpt that justifies this component. |
+| `provenance` | Implemented field | JSON/string metadata describing source family, external ID, tool, repo, or session context. |
 | `confidence` | Extractor or rule | 0.0–1.0. `< 0.6` → `needs_review`. |
 | `temporal` | Extractor or `_detect_temporal_hint` | One of `current`, `past`, `future`, `unknown`. |
 | `status` | Ingestion rule | `active`, `needs_review`, `proposed`, `stale`. Future temporal → `proposed`. Past temporal → `needs_review`. Low confidence → `needs_review`. |
@@ -188,9 +209,11 @@ Every relationship row **must** populate:
 | `evidence` | Non-null, non-empty string. Direct quote or deterministic rule description. Max 2048 chars. |
 | `confidence` | 0.0–1.0. `< 0.6` → row rejected. |
 | `status` | `active`, `proposed`, `rejected`. |
-| `origin` | **Proposed new field.** `deterministic` or `ai_suggested`. |
+| `origin` | Implemented field. Current normalized values include `deterministic`, `extracted`, `ai_proposed`, `human_verified`, and `proposed`. |
 
-**Gap:** `origin` does not exist. `evidence` is currently auto-generated from a template when missing (`app/services/ingest.py`, lines 147–148), which is insufficient for deterministic edges.
+**Current status:** `origin` exists on `Relationship`; ingestion and graph
+builders set origin and evidence for deterministic, extracted, and proposed
+edges.
 
 ---
 
@@ -220,13 +243,14 @@ The following types **must** be supported. New types require a migration and a d
 | `verified_by_human` | — | any → `Person` | Human comment says "confirmed" or "verified" | No | 0.90 | Verified by human | Yes |
 | `related_to` | — | any → any | Cross-document name match or AI suggestion with reasoning | Yes | 0.60 | Related to | No (low-confidence default hidden) |
 
-**Gap:** `fixes`, `resolved_by`, `conflicts_with`, `touches_file` are not in `VALID_RELATIONSHIP_TYPES` (`app/taxonomy.py`). `implements` is aliased to `implemented_in` (line 68), but there is no true `implements` type.
+**Current status:** `fixes`, `resolved_by`, `conflicts_with`, `touches_file`,
+`implements`, and `implemented_in` are all in `VALID_RELATIONSHIP_TYPES`.
 
 ### 3.2 Relationship Creation Rules
 
 1. **Deterministic relationships** (`origin = "deterministic"`) **must** have evidence that is a direct quote from the source text, or a generated string that includes the exact quote. They are created with `status = "active"`.
-2. **AI-suggested relationships** (`origin = "ai_suggested"`) **must** have evidence that is the AI's reasoning string. They are created with `status = "proposed"`.
-3. **No relationship may be created with `evidence = NULL` or empty string.** If current code produces empty evidence (e.g., `graph_builder.py` cross-doc inference), this is a **gap** to fix.
+2. **AI-proposed relationships** (`origin = "ai_proposed"`) **must** have evidence that is the AI's reasoning string. They are created with `status = "proposed"`.
+3. **No relationship may be created with `evidence = NULL` or empty string.** Current deterministic and cross-document inference paths populate evidence.
 4. **Self-loops are forbidden.** (Observed: enforced in `app/services/ingest.py`, line 120.)
 5. **Duplicate edges** (same source, target, type) are forbidden. (Observed: enforced in `app/services/ingest.py`, lines 136–144.)
 
@@ -428,7 +452,10 @@ The session root component:
 
 ### 6.6 Work Lens
 
-**Proposed new view.** A dedicated filtered view (or CEO view) that shows only:
+**Current status:** Graph lens presets now include work/gaps-style filters that
+surface high-signal blockers, decisions, questions, and active tasks.
+
+The intended dedicated work lens shows only:
 
 - Blockers: `Risk` components with `status = "active"` and `temporal = "current"`.
 - Open decisions: `Decision` components with `status = "active"` and no outgoing `implemented_in` relationship.
@@ -437,9 +464,10 @@ The session root component:
 
 ### 6.7 Context-Pack Lens
 
-**Observed:** `ContextPackAgent` (`app/agents/context_pack.py`) always generates from the full graph.
+**Current status:** `ContextPackAgent` can generate from the full graph or from
+selected `component_ids`.
 
-**Proposed:** Allow context-pack generation from a **selected graph slice**:
+Implemented selected-slice behavior:
 
 1. User selects one or more components on the canvas.
 2. Frontend POSTs `component_ids` to `/api/agents/context-pack`.

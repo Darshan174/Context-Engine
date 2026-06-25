@@ -2,9 +2,20 @@
 
 ## Intended Outcome
 
-Build `context-engine` into an OSS-grade developer context system.
+Build `context-engine` into an OSS-grade state-of-work engine for AI-native
+builders.
 
-It should ingest project knowledge from local files, AI-agent sessions, and future provider connectors, then produce a precise knowledge graph of:
+The first user is a solo founder or tiny team moving between Codex, Claude Code,
+OpenCode, GitHub, chat, and local files. The product must answer:
+
+- What changed?
+- What is blocked or unresolved?
+- Which agent decisions did not reach code, issues, or docs?
+- What should happen next?
+- What context should the next agent receive?
+
+It should ingest project activity from local files, AI-agent sessions, and
+provider connectors, then use a precise knowledge graph of:
 
 - models: first-class concepts such as Pricing, Roadmap, Security, Customer Segment, Integration, Feature, Constraint;
 - components: facts inside models, such as `$20 plan`, `Slack connector`, `SOC2 requirement`, `Q3 launch`;
@@ -21,10 +32,44 @@ It should ingest project knowledge from local files, AI-agent sessions, and futu
 ## Current State
 
 - Backend has connector catalog/status/sync contracts.
-- AI Context and local import are the first real ingestion paths.
-- External providers are stubs unless tested.
+- AI Context, local import, Slack, GitHub, Gmail, and Google Drive have source-document ingestion paths covered by tests or mocked sync tests.
+- Discord, Zoom, Wispr Flow, and Notion should not be described as working launch connectors.
 - Graph includes provenance, relationship evidence/confidence, and proposed context.
+- Graph UX has a Board default with source clusters, Explore mode with force-layout logo nodes, right-rail inspector, trust styling toggle, refine drawer, search, minimap, local 1-hop/2-hop panel, and edge review.
+- Board default opens at readable card zoom when whole-graph fit would hide labels; the minimap keeps overview context.
+- Query API now exposes `query.v1`, retrieval knobs (`top_k`, `min_confidence`, `hybrid`), relationship expansion, and facts-used trace.
+- Query now returns a deterministic source-backed answer summary when no AI answer model is configured.
+- Query status/confidence filtering now happens in SQL before semantic/lexical ranking.
+- Context packs can be generated from a selected graph component plus 1-hop neighbors, or from the full graph.
+- MCP now exposes `query_context`, which returns the same `query.v1` trace contract for AI-agent consumers.
+- MCP examples now cover installed CLI and local checkout configs plus an agent grounding prompt.
+- Dashboard now includes an I/O card showing what feeds Context Engine and what agents consume.
+- `/api/seed-demo` now creates an idempotent source-backed demo workspace from launch-available sources: GitHub, Slack, Gmail, Google Drive, and Codex.
+- Generic extracted facts inherit document-level provenance when source-specific extractors did not already provide it.
+- SQLite/SQLAlchemy schemas now include idempotent compound indexes for source-document sync lookup, pending extraction, component filtering, and relationship traversal.
 - Docs were updated to distinguish unknown connectors, coming-soon stubs, and missing setup routes.
+- Launch-facing docs now cover architecture, connectors, AI Context, Board vs Explore, and MCP.
+- Docker build/start/health smoke passes through `docker-compose.smoke.yml` on port 18080.
+- Source Manager now uses the shared frontend API client, separates unsupported/historical provider records from supported document imports, and has focused component coverage.
+- Landing/mock frontend copy now uses launch-available sources only, and the Connectors page no longer exposes dormant Notion/Zoom manual-connect actions.
+- Landing frontend smoke coverage now guards launch-source claims against stale unsupported-provider copy.
+- AgentsView frontend smoke coverage now guards agent source claims against stale unsupported-provider copy.
+- Frontend connector smoke tests now verify coming-soon providers stay disabled and launch connectors expose only backend-backed actions.
+- Backend connector tests now verify direct Zoom setup and Notion token routes cannot create fake connected state.
+- Community health files now include a security policy, issue forms, and a PR template aligned with provenance/evidence/connector-honesty rules.
+- `scripts/smoke.sh` now provides the local launch gate plus optional Docker/API smoke for release tags.
+- `scripts/doctor.sh` now provides read-only first-run diagnostics for Docker
+  and bare-metal paths, and smoke syntax checks cover it.
+- Bare-metal setup now creates `.venv`, validates Python versions robustly, uses `npm ci`, and the start/dev/smoke scripts reuse that interpreter.
+- CLI ingest now honors `--sync` for single-file and bulk directory imports, with focused CLI/API coverage.
+- README quick-start clone commands now use the real GitHub remote and a stable lowercase checkout directory, with docs coverage preventing placeholder regression.
+- README now includes real seeded-demo screenshots and a linked demo walkthrough for first-time GitHub visitors.
+- PyPI/installer metadata now includes MIT license, repository/issues URLs, keywords, and classifiers, with docs coverage preventing metadata drift.
+- Dockerfile copies `LICENSE` before package install so license-file metadata works during container builds.
+- Docker/API smoke now verifies demo seed, stats, query, and Zoom/Notion setup guardrails.
+- CI now runs frontend tests and smoke-compose config validation in addition to backend tests, Ruff, frontend build, and Docker image build.
+- Slack connector tests now match the current contract: OAuth/setup-backed availability, generic direct-connect rejection.
+- OSS basics now include `LICENSE` and `CONTRIBUTING.md`.
 
 ## 5x Workload
 
@@ -38,7 +83,7 @@ It should ingest project knowledge from local files, AI-agent sessions, and futu
 
 ### Phase 2: Connector Honesty and UX
 
-- Fix Slack so unsupported setup cannot look available.
+- Keep Slack honest: available through OAuth/setup and tested sync paths, but not through generic direct connect.
 - Hide or disable frontend actions that call missing or unavailable provider setup paths.
 - Ensure catalogued coming-soon connectors return honest API errors.
 - Add tests for connect/sync behavior across all connector states.
@@ -64,7 +109,7 @@ It should ingest project knowledge from local files, AI-agent sessions, and futu
 
 - Add migration coverage for connector and graph schema changes.
 - Ensure existing SQLite installs upgrade safely.
-- Add indexes for graph queries and connector status queries.
+- Keep graph/query/source indexes aligned with the read paths as the graph grows.
 - Define a future Postgres path without breaking SQLite default.
 - Add import idempotency tests.
 
@@ -94,7 +139,7 @@ It should ingest project knowledge from local files, AI-agent sessions, and futu
 ### Phase 9: OSS Readiness
 
 - Add LICENSE.
-- Add CONTRIBUTING, architecture overview, connector guide, AI Context guide, graph contract docs.
+- Maintain CONTRIBUTING, architecture overview, connector guide, AI Context guide, graph contract docs, and release smoke instructions.
 - Add setup/run/test commands that work from a clean checkout.
 - Document unsupported provider status honestly.
 - Keep readiness score tied to verified commands.
@@ -134,7 +179,7 @@ You are GLM 5.1 working in /Users/darshann/Desktop/context-engine on branch agen
 Read AGENTS.md, TASK_PLAN.md, .agent-runs/glm-task.md, app/api/connectors.py, tests/test_connectors.py, frontend/src/api/hooks.js, frontend/src/pages/Connectors.jsx, app/services/ingest.py, app/processing/extractor.py.
 
 Implement connector honesty and AI-context hardening. Scope:
-- Slack must not appear available/setup-complete while unsupported.
+- Slack must appear available only through OAuth/setup and tested sync paths; generic direct connect must stay rejected.
 - Coming-soon providers must not connect or sync as working integrations.
 - Frontend must hide/disable actions that call missing or unavailable setup paths.
 - AI Context import must preserve metadata, source type, session fields, and processing summary counts.
