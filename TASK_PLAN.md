@@ -2,9 +2,20 @@
 
 ## Intended Outcome
 
-Build `context-engine` into an OSS-grade developer context system.
+Build `context-engine` into an OSS-grade state-of-work engine for AI-native
+builders.
 
-It should ingest project knowledge from local files, AI-agent sessions, and future provider connectors, then produce a precise knowledge graph of:
+The first user is a solo founder or tiny team moving between Codex, Claude Code,
+OpenCode, GitHub, chat, and local files. The product must answer:
+
+- What changed?
+- What is blocked or unresolved?
+- Which agent decisions did not reach code, issues, or docs?
+- What should happen next?
+- What context should the next agent receive?
+
+It should ingest project activity from local files, AI-agent sessions, and
+provider connectors, then use a precise knowledge graph of:
 
 - models: first-class concepts such as Pricing, Roadmap, Security, Customer Segment, Integration, Feature, Constraint;
 - components: facts inside models, such as `$20 plan`, `Slack connector`, `SOC2 requirement`, `Q3 launch`;
