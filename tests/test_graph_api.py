@@ -796,6 +796,97 @@ class TestContextDigestEndpoint:
         assert "Blocker: Workspace one blocker" in card_titles
         assert "Blocker: Workspace two blocker" not in card_titles
 
+    async def test_context_digest_filters_instruction_and_media_noise(self, client, db_session):
+        model = Model(id=uuid4(), name="Codex session digest")
+        doc = SourceDocument(
+            id=uuid4(),
+            source_type="agent_session",
+            external_id="codex:session:noisy",
+            content="Codex session with one real decision and noisy payload fragments.",
+            metadata_json=json.dumps({"tool": "codex", "session_id": "noisy"}),
+        )
+        valid = Component(
+            id=uuid4(),
+            model_id=model.id,
+            source_document_id=doc.id,
+            name="Keep graph zoom inside board",
+            value="Decision: keep graph zoom scoped to the digest board instead of scaling the page.",
+            fact_type="decision",
+            confidence=0.82,
+            status="active",
+        )
+        instruction_noise = Component(
+            id=uuid4(),
+            model_id=model.id,
+            source_document_id=doc.id,
+            name="Decision: base_instructions",
+            value="developer instructions require request escalation, prefix_rule handling, and current date handling.",
+            fact_type="decision",
+            confidence=0.91,
+            status="active",
+        )
+        media_noise = Component(
+            id=uuid4(),
+            model_id=model.id,
+            source_document_id=doc.id,
+            name="./",
+            value=f"data:image/png;base64,{'A' * 220}",
+            fact_type="blocker",
+            confidence=0.91,
+            status="active",
+        )
+        progress_noise = Component(
+            id=uuid4(),
+            model_id=model.id,
+            source_document_id=doc.id,
+            name="Risk: only because Vitest does not accept Jest's --runInBand flag here, so I'm rerunning the actual project test command.",
+            value="only because Vitest does not accept Jest's --runInBand flag here, so I'm rerunning the actual project test command.",
+            fact_type="blocker",
+            confidence=0.82,
+            status="active",
+        )
+        db_session.add_all([model, doc, valid, instruction_noise, media_noise, progress_noise])
+        await db_session.flush()
+
+        resp = await client.get("/api/context/digest")
+        assert resp.status_code == 200
+        titles = {card["title"] for card in resp.json()["cards"]}
+
+        assert "Decision: Keep graph zoom inside board" in titles
+        assert "Decision: base_instructions" not in titles
+        assert "Blocker: ./" not in titles
+        assert not any("runInBand" in title for title in titles)
+
+    async def test_context_digest_treats_agent_risk_as_risk_not_critical_blocker(self, client, db_session):
+        model = Model(id=uuid4(), name="Codex session risk")
+        doc = SourceDocument(
+            id=uuid4(),
+            source_type="agent_session",
+            external_id="codex:session:risk",
+            content="Codex session with one risk.",
+            metadata_json=json.dumps({"tool": "codex", "session_id": "risk"}),
+        )
+        risk = Component(
+            id=uuid4(),
+            model_id=model.id,
+            source_document_id=doc.id,
+            name="Risk: Docker packaging still needs verification",
+            value="Docker packaging still needs verification before release.",
+            fact_type="blocker",
+            confidence=0.82,
+            status="active",
+        )
+        db_session.add_all([model, doc, risk])
+        await db_session.flush()
+
+        resp = await client.get("/api/context/digest")
+        assert resp.status_code == 200
+        data = resp.json()
+        card = next(card for card in data["cards"] if card["title"] == "Risk: Docker packaging still needs verification")
+
+        assert card["type"] == "risk"
+        assert data["health"]["status"] != "critical"
+
 
 class TestTimelineEndpoint:
     async def test_timeline_returns_events(self, client, db_session):
