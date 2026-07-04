@@ -16,11 +16,11 @@ must build against. It preserves the current launch baseline:
 
 - `SourceDocument` stores raw content, source type, external ID, author, URL,
   metadata, workspace scope, ingest time, and process time.
-- The contract-time integration worktree contained unmerged additive schema
-  stubs for `content_sha256`, `trust_zone`, `source_created_at`,
-  `EvidenceSpan`, `Claim`, `ClaimRevision`, `ContextPack`, `ContextPackItem`,
-  `AgentRun`, `RunObservation`, and repo-index tables. Treat those as
-  in-progress implementation, not proof that the v2 contract is complete.
+- The current dirty checkout already contains unmerged additive schema stubs for
+  `content_sha256`, `trust_zone`, `source_created_at`, `EvidenceSpan`, `Claim`,
+  `ClaimRevision`, `ContextPack`, `ContextPackItem`, `AgentRun`,
+  `RunObservation`, and repo-index tables. Treat those as in-progress
+  implementation, not proof that the v2 contract is complete.
 - `Component` stores the current graph fact projection with `value`,
   `fact_type`, `temporal`, `confidence`, `authority_weight`, `status`,
   `provenance`, `excerpt`, source linkage, and optional entity identity.
@@ -32,8 +32,20 @@ must build against. It preserves the current launch baseline:
   `RetrievalEvent.trace_json`.
 - `ContextPackAgent` currently renders a simple markdown handoff from selected
   components plus one-hop relationships. It is not the v2 compiler.
-- MCP currently exposes read/query tools only. v2 adds runtime observation tools
-  but no dangerous tools.
+- The current checkout includes an in-progress `app/services/context_compiler.py`,
+  `app/api/context.py`, router registration for `/api/context/prepare`, and
+  `ctxe prepare`. Treat those as implementation leads, not proof that the final
+  v2 contract is satisfied.
+- Observed contract gaps in the in-progress compiler: manifest health is under
+  `context_health` rather than required top-level `health_score`; excluded
+  context emits singular `citation` rather than `citations`; `persistence`
+  lacks final `committed`, `context_pack_table`, `context_pack_item_count`,
+  `verified_at`, and `compatibility_reason` fields; file-output mode lacks the
+  final `errors` shape; and the in-progress compiler persists only a subset of
+  the final `ContextPackItem` audit fields.
+- MCP currently exposes read/query tools and runtime observation tools. Its
+  `prepare_task` path imports Agent 3's compiler service when present and
+  verifies durable pack rows before returning. v2 adds no dangerous tools.
 
 ## Evidence Ledger
 
@@ -650,6 +662,37 @@ Agent 2 owns schema; Agent 3 consumes it.
 - `token_cost`
 - `created_at`
 
+Runtime table capacity rule:
+
+- Agent 2 must validate that the ORM and migration can store every field above
+  before Agent 3 depends on persistence.
+- The current checkout's `ContextPackItem` class exposes the final audit fields,
+  including `item_type`, `claim_id`, `source_document_id`, and `created_at`.
+  Agent 2 still owns migration/ORM validation for those fields, and Agent 3 must
+  populate them instead of relying only on manifest JSON.
+- If a selected item has no available claim/component/evidence/source reference,
+  the `ContextPackItem` row still persists `item_type`, `score`,
+  `inclusion_reason`, and `token_cost`; the manifest carries the explicit
+  `legacy_component` or `repo_state` reason.
+
+Persistence invariants:
+
+- The compiler must build the final manifest after `context_pack_id`,
+  `created_at`, rendering metadata, and persistence metadata are known, then
+  persist that exact final manifest.
+- `POST /api/context/prepare` must commit the `ContextPack` row and all
+  selected `ContextPackItem` rows before returning success.
+- A fresh database session must be able to load the returned `context_pack_id`
+  and observe the same markdown, manifest, health score, and item rows.
+- Stored `ContextPack.markdown` must equal the returned final markdown exactly.
+- Parsed stored `ContextPack.manifest` must equal the returned final manifest.
+- Selected item rows must match returned selected manifest items by
+  `item_type`, `claim_id`, `component_id`, `evidence_span_id`,
+  `source_document_id`, `score`, `inclusion_reason`, and `token_cost`.
+- `ctxe prepare` must either use the same durable persistence path or emit a
+  tested `persistence.mode = "file_output_only"` manifest with
+  `context_pack_id = null`; it must not return a fake pack ID.
+
 Idempotency:
 
 - If `(workspace_id, objective, target_model, repo_head_commit,
@@ -657,6 +700,31 @@ Idempotency:
   pack.
 - Without idempotency key, always create a new pack because repo/context state
   may have changed.
+
+## API/CLI/MCP Equivalence Matrix
+
+All prepare surfaces use the manifest schema in
+`docs/context-pack-v2.md`. HTTP and MCP are required to be durable database
+surfaces. CLI may support file-output-only compatibility only when the manifest
+states that explicitly.
+
+| Surface | Markdown | Manifest | Durable `context_pack_id` | `ContextPackItem` audit rows | Health score | Selected citations | Excluded reasons |
+|---|---|---|---|---|---|---|---|
+| `POST /api/context/prepare` | Returned and stored exactly in `ContextPack.markdown`. | Returned and stored exactly in `ContextPack.manifest`. | Required UUID, committed before response. | Required for every selected context item. | Returned as `health_score` and included in manifest. | Required in manifest. | Required in manifest. |
+| `ctxe prepare` database mode | Written to stdout/`--out` and stored exactly. | Written to stdout/`--manifest-out`/JSON and stored exactly. | Required UUID when persistence is available. | Required when persistence is available. | Required in CLI output and manifest. | Required in manifest. | Required in manifest. |
+| `ctxe prepare` file-output-only mode | Written to stdout/`--out`; not stored. | Written with `persistence.mode = "file_output_only"`. | Must be `null`; no fake ID. | None; count must be `0`. | Required in manifest. | Required in manifest. | Required in manifest. |
+| MCP `prepare_task` | Returned exactly; must match stored row. | Returned exactly; must match stored row. | Required UUID, committed before return. | Required for every selected context item. | Returned as `health_score` and included in manifest. | Required in manifest. | Required in manifest. |
+| Persisted `ContextPack` | Stores final markdown. | Stores final manifest JSON. | Row `id` equals manifest `context_pack_id`. | Related rows must exist for selected items. | Stores column value matching response. | Stored in manifest. | Stored in manifest. |
+| Persisted `ContextPackItem` | Not stored on item row. | Not stored on item row. | References parent pack. | Stores selected item audit fields. | Not stored on item row. | Stores IDs/references; full citation remains in manifest. | Not applicable. |
+
+Equivalence acceptance:
+
+- HTTP, MCP, and persisted `ContextPack` must agree on markdown, manifest,
+  `context_pack_id`, `health_score`, selected citations, and excluded reasons.
+- CLI database mode must agree with HTTP for the same inputs except for output
+  destination fields outside the manifest.
+- CLI file-output-only mode is a compatibility mode, not product success for
+  API/MCP; it must be documented and tested separately.
 
 ## ModelCapabilityProfile
 
@@ -689,6 +757,45 @@ Behavior:
 - Evidence excerpts are short and cited. Long raw source dumps are forbidden.
 - Do not claim small models become frontier models. The contract claim is that
   compiled context narrows avoidable context gaps.
+
+## State And Status Contract
+
+Allowed values and mappings:
+
+| Object | Field | Allowed values | Selection/read behavior |
+|---|---|---|---|
+| `Claim` | `status` | `active`, `proposed`, `needs_review`, `superseded`, `rejected`, `stale`, `resolved` | `active` can be selected as current context. `proposed` and `needs_review` can be selected only with clear review labels. `superseded`, `rejected`, and `stale` default to excluded context. `resolved` is historical. |
+| `Component` | `status` | `active`, `proposed`, `needs_review`, `superseded`, `rejected`, `stale`, `resolved` | Legacy graph reads keep `active`, `proposed`, and `needs_review`; stale/rejected/superseded/resolved rows are hidden from default active-blocker counts unless history is requested. |
+| `EvidenceSpan` | `review_status` | `verified`, `needs_review`, `rejected` | `verified` can support active claims. `needs_review` can support proposed/needs-review claims. `rejected` cannot support selected current instructions. |
+| `ContextPack` | `pack_version` | `context_pack.v2` | v2 prepare surfaces must write this exact value. Older pack formats must stay on separate legacy endpoints. |
+| `AgentRun` | `status` | `running`, `completed`, `failed`, `blocked`, `cancelled` | Only `running` is active. `completed`, `failed`, `blocked`, and `cancelled` are prior-run evidence. |
+| MCP `verify_context_item` | `verdict` | `verified`, `incorrect`, `stale`, `needs_review`, `resolved` | Maps to claim/component statuses below. |
+
+MCP verdict mapping:
+
+| MCP verdict | Claim revision operation | Claim status after | Component status after |
+|---|---|---|---|
+| `verified` | `verify` | `active` | `active` |
+| `incorrect` | `reject` | `rejected` | `rejected` |
+| `stale` | `mark_stale` | `stale` | `stale` |
+| `needs_review` | `verify` with review note | `needs_review` | `needs_review` |
+| `resolved` | `resolve` | `resolved` | `resolved` |
+
+Resolved-blocker rule:
+
+- A blocker/risk claim or component with `status = "resolved"` must not count
+  as an active blocker, must not be force-selected by the compiler's active
+  blocker rule, and must not reduce context health.
+- Resolved blockers may appear in selected context only as prior-run/history
+  evidence when directly relevant to the objective.
+- A later recurrence of the same problem must create or update a separate
+  active blocker revision; do not reactivate resolved work implicitly.
+
+Health-score scale:
+
+- Manifest `health_score` is normalized `0.0..1.0`.
+- Internal readiness formulas may compute `0..100`, but they must be divided by
+  `100` before entering the manifest or API/MCP response.
 
 ## Repo Intelligence
 
@@ -724,14 +831,42 @@ Agent 3 required tests:
 - `tests/test_context_compiler.py::test_small_coder_profile_outputs_paths_steps_commands_and_stop_conditions`
 - `tests/test_cli.py::test_cli_prepare_calls_context_prepare_endpoint`
 
+## Test Acceptance Matrix
+
+| Owner | File | Test name | Behavior asserted | Failure mode prevented |
+|---|---|---|---|---|
+| Agent 2 | `tests/test_migrations.py` | `test_context_pack_item_schema_supports_final_contract_fields` | Migration/ORM includes `item_type`, `claim_id`, `component_id`, `evidence_span_id`, `source_document_id`, `score`, `inclusion_reason`, `token_cost`, and `created_at`. | Agent 3 can only persist a partial audit row or hides data only in manifest JSON. |
+| Agent 2 | `tests/test_evidence_ledger.py` | `test_source_document_hash_and_trust_zone_are_set_on_ingest` | New source rows get `content_sha256`, conservative `trust_zone`, and provider `source_created_at` where available. | Ungrounded or untrusted content enters the compiler without provenance controls. |
+| Agent 2 | `tests/test_evidence_ledger.py` | `test_exact_evidence_span_offsets_and_hash_validate` | Exact spans validate offsets and SHA-256 against immutable source content. | Evidence citations drift away from source text. |
+| Agent 2 | `tests/test_evidence_ledger.py` | `test_llm_fuzzy_evidence_creates_needs_review_span` | Unlocated/fuzzy LLM evidence is stored only as `needs_review`. | LLM-only claims become active without source support. |
+| Agent 2 | `tests/test_claim_graph.py` | `test_claim_revision_requires_evidence_span` | Every claim revision points to an evidence span. | Claim history becomes unverifiable. |
+| Agent 2 | `tests/test_claim_graph.py` | `test_claim_projects_to_component_with_claim_id` | New claims project to components while preserving `claim_id`. | Graph/query loses the claim provenance layer. |
+| Agent 2 | `tests/test_claim_graph.py` | `test_resolved_blocker_does_not_count_as_active_blocker` | Resolved blockers remain historical and are excluded from active-blocker counts. | Compiler keeps blocking on already resolved work. |
+| Agent 2 | `tests/test_migrations.py` | `test_context_pack_runtime_rows_round_trip_in_fresh_session` | `ContextPack`, `ContextPackItem`, `AgentRun`, `RunObservation`, and repo index rows read back from a fresh session. | Persistence only works in a flushed in-memory transaction. |
+| Agent 3 | `tests/test_context_compiler.py` | `test_manifest_uses_final_context_pack_v2_key_names` | Manifest uses `context_pack_id`, `created_at`, `item_type`, rendering metadata, citations, and persistence metadata. | Split manifest contracts survive into API/CLI/MCP. |
+| Agent 3 | `tests/test_context_compiler.py` | `test_compile_pack_persists_manifest_markdown_and_items` | Compiler writes final markdown/manifest plus selected item rows. | Returned pack is not auditable in the database. |
+| Agent 3 | `tests/test_context_compiler.py` | `test_api_prepare_commits_pack_readable_from_fresh_session` | HTTP prepare commits before response and returned ID loads in a new session. | API returns a pack ID that disappears after request scope closes. |
+| Agent 3 | `tests/test_context_compiler.py` | `test_stored_manifest_and_markdown_equal_returned_payload` | Stored row values equal returned final payload after IDs and persistence metadata are added. | Stored and returned artifacts diverge. |
+| Agent 3 | `tests/test_cli.py` | `test_cli_prepare_persistence_mode_is_explicit` | CLI either persists/read-backs rows or emits tested file-output-only metadata with `context_pack_id = null`. | CLI silently claims persistence without durable rows. |
+| Agent 3 | `tests/test_context_compiler.py` | `test_scoring_uses_exact_weights_and_penalties` | Candidate scoring uses the documented weights and prompt-injection/staleness penalties. | Agents receive stale, risky, or irrelevant context. |
+| Agent 3 | `tests/test_context_compiler.py` | `test_small_coder_profile_outputs_paths_steps_commands_and_stop_conditions` | Small model packs include explicit paths, numbered steps, commands, citations, and stop conditions. | Small coder models get vague narrative context. |
+| Agent 4 | `tests/test_mcp.py` | `test_prepare_task_matches_http_prepare_contract` | MCP returns the same final manifest/markdown shape as HTTP prepare. | MCP drifts into a parallel contract. |
+| Agent 4 | `tests/test_mcp.py` | `test_prepare_task_returns_only_durable_context_pack_id` | Returned MCP pack ID loads from DB and stored artifacts match response. | MCP reports non-durable or stale IDs. |
+| Agent 4 | `tests/test_mcp.py` | `test_mcp_runtime_write_tools_persist_source_backed_loop` | Runtime tools create source documents, observations, and conservative claim/component updates. | Agent observations become ungrounded memory. |
+| Agent 4 | `app/evals/context_compiler/test_prompt_injection_leakage.py` | `test_untrusted_evidence_is_quoted_or_excluded` | High-risk evidence never becomes commands or plan steps. | Prompt-injection text is promoted to instructions. |
+| Agent 4 | `tests/test_context_compiler_eval.py` | `test_eval_metrics_consume_final_manifest_schema` | Evals read final `citations`, `item_type`, rendering, persistence, and excluded reasons. | Evals pass against an obsolete lightweight manifest. |
+| Codex | `tests/test_context_compiler.py` | `test_golden_github_pagination_pack_contract` | Golden objective produces required files, connector constraints, verification commands, and stop conditions. | Integration loses the main acceptance scenario. |
+| Codex | `tests/test_cli.py` and `tests/test_mcp.py` | `test_prepare_surfaces_are_equivalent_after_merge` | API, CLI database mode, MCP, and persisted rows agree on final manifest/markdown. | Cross-surface drift after branch merge. |
+| Codex | `tests/test_evidence_ledger.py tests/test_claim_graph.py tests/test_context_compiler.py tests/test_mcp.py` | `test_v2_context_loop_regression_suite` | Evidence -> claims -> pack -> run observation loop works in one integrated test pass. | Separate agent branches pass alone but fail together. |
+
 ## Merge Matrix
 
 | Agent | Files owned | Must not own | Notes |
 |---|---|---|---|
 | Agent 1 | `docs/context-compiler-v2.md`, `docs/context-pack-v2.md`, `docs/security-context-packs.md`, contract sections in `docs/mcp.md`, `.agent-runs/agent-1-task.md` | code, migrations, frontend | Contract lands first. |
-| Agent 2 | `app/models.py`, `app/migrations.py`, `app/alembic/versions/*`, `app/services/ingest.py`, `app/processing/extractor.py`, `app/processing/source_extractors.py`, `app/taxonomy.py`, evidence/claim tests | compiler, MCP tools, frontend | Owns additive schema and extraction grounding. |
-| Agent 3 | `app/services/context_compiler.py`, `app/services/model_profiles.py`, `app/services/repo_indexer.py`, `app/agents/context_pack.py`, context API route, `app/cli/main.py`, compiler/repo/CLI tests | migrations, MCP write tools, connector semantics | Uses Agent 2 tables, preserves legacy pack endpoint. |
-| Agent 4 | `app/mcp/server.py`, MCP examples, `app/evals/context_compiler/**`, `docs/mcp.md` runtime usage, `docs/oss-readiness.md`, MCP/eval tests | migrations, core compiler internals, connector OAuth | Calls Agent 3 service; adds eval proof. |
+| Agent 2 | `app/models.py`, `app/migrations.py`, `app/alembic/versions/*`, `app/services/ingest.py`, `app/processing/extractor.py`, `app/processing/source_extractors.py`, `app/taxonomy.py`, evidence/claim tests | compiler, MCP tools, frontend | Owns additive schema and extraction grounding. Must validate runtime table capacity for the final manifest and selected item audit fields. |
+| Agent 3 | `app/services/context_compiler.py`, `app/services/model_profiles.py`, `app/services/repo_indexer.py`, `app/agents/context_pack.py`, context API route, `app/cli/main.py`, compiler/repo/CLI tests | migrations, MCP write tools, connector semantics | Uses Agent 2 tables, preserves legacy pack endpoint. Must fix compiler, API, CLI, persistence tests, and stored/returned artifact consistency. |
+| Agent 4 | `app/mcp/server.py`, MCP examples, `app/evals/context_compiler/**`, `docs/mcp.md` runtime usage, `docs/oss-readiness.md`, MCP/eval tests | migrations, core compiler internals, connector OAuth | Calls Agent 3 service; adds eval proof. Must update MCP/docs/evals to the final manifest contract in `docs/context-pack-v2.md`. |
 | Codex | integration review, conflict resolution, final smoke | n/a | Merges and verifies in order. |
 
 Known conflict files:
@@ -750,6 +885,21 @@ Required integration order:
 3. Agent 3 compiler, repo indexer, API, CLI.
 4. Agent 4 MCP bridge, evals, docs updates.
 5. Codex final review, conflict resolution, focused tests, full smoke.
+
+Codex post-merge checks for the review follow-ups:
+
+- API persistence round trip in a fresh session:
+  `POST /api/context/prepare` returns a durable pack ID and committed item
+  rows.
+- CLI persistence or compatibility mode:
+  `ctxe prepare` either writes durable rows through the configured database or
+  returns tested `persistence.mode = "file_output_only"` metadata.
+- Stored manifest/markdown consistency:
+  `ContextPack.manifest` and `ContextPack.markdown` match the final response
+  after identifiers and persistence metadata are added.
+- MCP equivalence:
+  MCP `prepare_task` returns the same final contract as HTTP prepare and never
+  reports a non-durable `context_pack_id`.
 
 Stop condition: if an implementation branch needs to change connector status
 semantics or make unsupported connectors appear connected, stop and escalate to
