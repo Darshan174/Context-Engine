@@ -43,13 +43,17 @@ project sources; then turn that activity into a source-backed view of:
 - what agents decided or attempted;
 - where code, issues, and documentation disagree;
 - what the next human or agent should do;
-- a clean `context_pack.v2` markdown packet plus manifest for the next agent run.
+- a focused handoff for the next agent run.
 
-Implemented in this branch, the v2 loop is:
+The v2 direction is:
 
 ```text
 prepare context -> agent works -> observe result -> ingest result -> improve next context
 ```
+
+Current checkout note: the MCP observation side of this loop is implemented.
+The `context_pack.v2` compiler, `POST /api/context/prepare`, and `ctxe prepare`
+are not present yet.
 
 The project graph is the primary navigation surface. Users can explore
 relationships between sessions, decisions, tasks, risks, issues, PRs, and
@@ -600,7 +604,7 @@ MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `prepare_task` | Compile `context_pack.v2` markdown plus manifest through the compiler service |
+| `prepare_task` | Registered MCP bridge for `context_pack.v2`; returns `compiler_unavailable` in this checkout until Agent 3's compiler service is present |
 | `query_context` | Ask the graph with the same `query.v1` facts-used trace returned by `/api/query` |
 | `search_nodes` | Rank matching graph components |
 | `expand_graph` | Return a component plus 1-hop relationship neighbors with evidence |
@@ -633,7 +637,6 @@ evidence, not instruction.
 | `GET` | `/api/graph` | Full knowledge graph |
 | `POST` | `/api/graph/build` | Build/rebuild the graph |
 | `POST` | `/api/query` | Natural language query with `top_k`, `min_confidence`, `hybrid`, and a versioned `trace` |
-| `POST` | `/api/context/prepare` | Compile `context_pack.v2` markdown plus manifest |
 | `GET` | `/api/models` | List domain models |
 | `GET` | `/api/connectors` | List connectors and status |
 | `POST` | `/api/agents/gaps` | Run Gap Detector agent |
@@ -641,6 +644,10 @@ evidence, not instruction.
 | `POST` | `/api/agents/context-pack` | Generate Context Pack |
 
 Full interactive docs at **http://localhost:8000/docs**
+
+Not implemented in this checkout: `POST /api/context/prepare` and
+`ctxe prepare`. The MCP `prepare_task` tool is import-safe and returns
+`compiler_unavailable` until the compiler service is added.
 
 ---
 

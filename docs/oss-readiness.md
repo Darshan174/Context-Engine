@@ -1,15 +1,16 @@
 # OSS Readiness Review
 
-Last updated: 2026-07-03
-Reviewed: 2026-05-01 by Xiaomi MiMo V2.5 Pro; refreshed 2026-07-03 after Context Compiler v2 persistence, compiler, MCP bridge, and eval-fixture work landed in the working tree.
+Last updated: 2026-07-04
+Reviewed: 2026-05-01 by Xiaomi MiMo V2.5 Pro; refreshed 2026-07-04 for the Agent 4 MCP/eval/docs pass.
 
 ## Score
 
-Current v2 branch OSS readiness: 8.4/10
+Current v2 branch OSS readiness: 6.6/10
 
 This score is for the current Context Compiler v2 working tree, not a public
-release tag. It reflects implemented backend/runtime behavior and passing tests,
-but also the remaining hardening gaps listed below.
+release tag. It reflects implemented backend/runtime persistence and MCP
+observation tools, but the Agent 3 compiler/API/CLI prepare surfaces are absent
+in this checkout.
 
 ## What Is Working
 
@@ -69,15 +70,17 @@ but also the remaining hardening gaps listed below.
 - Implemented in this branch: evidence spans, claims, claim revisions, context
   packs, context pack items, agent runs, run observations, and repo-index tables
   are present in SQLAlchemy metadata and migration tests.
-- Implemented in this branch: `POST /api/context/prepare` and MCP
-  `prepare_task` produce `context_pack.v2` markdown plus manifest through the
-  compiler service.
+- Implemented in this branch: MCP `prepare_task` is import-safe. In this
+  checkout it returns `compiler_unavailable` because `app/services/context_compiler.py`
+  is absent; when a compiler is present, MCP validates the returned pack ID,
+  stored manifest, and stored markdown before returning success.
 - Implemented in this branch: MCP runtime write tools persist agent events,
   decisions, blockers, patch summaries, verification evidence, and task close
   evidence without code edits, shell execution, git pushes, or provider writes.
-- Implemented in this branch: context compiler eval fixtures and metric
-  functions cover recall, precision, evidence coverage, stale leakage, conflict
-  detection, token efficiency, and verification presence.
+- Implemented in this branch: context compiler eval fixtures and metric helpers
+  cover recall, precision, evidence coverage against final citation fields,
+  stale leakage, conflict detection, token efficiency, and verification-command
+  presence on fixtures.
 
 ## Verification
 
@@ -86,56 +89,47 @@ pytest -q
 cd frontend && npm run build
 ```
 
-Latest verified result:
+Latest verified result from this Agent 4 pass:
 
-- `pytest -q`: 414 passed, 1 SQLite datetime deprecation warning
-- `pytest -q tests/test_mcp.py`: 3 passed
-- `pytest -q tests/test_context_compiler.py`: 7 passed
-- `pytest -q tests/test_context_compiler_eval.py`: 2 passed
-- `python3 -m pytest tests/ -q`: 326 passed
-- `python3 -m pytest tests/test_docs.py -q`: 6 passed
-- `python3 -m pytest tests/test_graph_api.py -q`: 29 passed
-- `python3 -m pytest tests/test_migrations.py -q`: 8 passed
-- `bash -n scripts/doctor.sh`: passed
-- Shell script syntax check for setup/start/dev/doctor/smoke scripts: passed
-- `bash scripts/doctor.sh --bare-metal`: passed with one expected checkout
-  warning because `.venv` is not present in this workspace.
-- `ruff check app tests`: passed
-- `npm test`: 29 passed
-- `npm run build`: passed
-- `python3 -m pip install . --no-deps --dry-run`: passed
-- `bash scripts/smoke.sh`: passed
-- `bash scripts/smoke.sh --docker`: passed
-- `docker compose config --quiet`: passed
-- `docker compose -f docker-compose.smoke.yml -p context-engine-smoke config --quiet`: passed
-- Docker build/start/health smoke on port 18080: passed
-- Container API smoke: `/api/seed-demo` created 6 documents and 27 components;
-  `/api/stats` returned 10 models, 27 components, 19 relationships, and 6
-  sources; `/api/query` returned a non-empty `query.v1` source-backed answer;
-  Zoom and Notion setup guardrails returned the expected unavailable errors.
+- `pytest -q`: 412 passed, 1 SQLite datetime deprecation warning.
+- `pytest -q tests/test_mcp.py tests/test_context_compiler_eval.py tests/test_docs.py`: 13 passed.
+- `pytest -q tests/test_mcp.py tests/test_cli.py`: 13 passed.
+
+Not verified in this pass:
+
+- Frontend tests/build.
+- Docker smoke.
+- `tests/test_context_compiler.py`, because that file is absent in this checkout.
 
 ## Remaining Launch Blockers
 
 ### P0
 
 - Resolved 2026-06-17: `LICENSE` and `CONTRIBUTING.md` now exist.
+- Agent 3 compiler service is absent, so MCP `prepare_task` cannot compile a
+  `context_pack.v2` yet and returns `compiler_unavailable`.
+- `app/services/context_compiler.py`, `POST /api/context/prepare`,
+  `ctxe prepare`, and `tests/test_context_compiler.py` are absent in this
+  checkout. Auxiliary Agent 3 files such as model profiles and repo indexing may
+  be present, but they are not enough for MCP prepare.
 
 ### P1
 
 - MCP runtime write tools do not yet implement idempotency keys, so repeated
   client calls can create duplicate source evidence.
-- The context compiler eval fixture defines metrics and expected context, but no
-  public benchmark run should be claimed yet.
-- Keep `docs/mcp.md` synchronized: the top runtime section is implemented, while
-  the longer contract section remains proposed hardening.
+- The context compiler eval fixture defines metrics and expected context, but it
+  is not a benchmark or solve-rate proof.
+- Keep `docs/mcp.md` synchronized: the runtime write tools are implemented, the
+  prepare path is blocked on the compiler service, and the longer contract
+  section remains proposed hardening.
 - Keep connector documentation synchronized with the backend catalog. Current README status is authoritative for launch copy.
 - Run `bash scripts/smoke.sh --docker` from a fresh clone before a public
   release tag.
 
 ### P2
 
-- Compiler ranking is deterministic and source-backed, but still a first-pass
-  heuristic; larger installs need richer candidate retrieval and reranking.
+- Compiler ranking is not reviewable in this checkout because the compiler
+  service is absent.
 - There is no frontend workflow yet for inspecting persisted `context_pack.v2`
   manifests or `AgentRun` observations.
 - MCP `query_context` uses the indexed query filter path, but semantic scoring
