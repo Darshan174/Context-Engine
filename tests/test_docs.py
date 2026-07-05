@@ -17,12 +17,17 @@ BOARD_DEMO_IMAGE = Path("docs/assets/board-inspector-demo.jpg")
 QUERY_DEMO_IMAGE = Path("docs/assets/query-trace-demo.jpg")
 
 
-def test_readme_quickstart_uses_real_copy_paste_clone_url():
+def test_readme_marks_setup_and_deployment_as_coming_soon():
     text = README.read_text(encoding="utf-8")
 
     assert "github.com/your-org/context-engine.git" not in text
-    assert "git clone https://github.com/Darshan174/Context-Engine.git context-engine" in text
-    assert text.count("git clone https://github.com/Darshan174/Context-Engine.git context-engine") == 2
+    assert "## Setup\n\nComing soon." in text
+    assert "## Deployment\n\nComing soon." in text
+    assert "## Contributing\n\nComing soon." in text
+    assert "git clone https://github.com/Darshan174/Context-Engine.git context-engine" not in text
+    assert "docker compose up --build" not in text
+    assert "bash scripts/setup.sh" not in text
+    assert "fly launch" not in text
 
 
 def test_pyproject_exposes_oss_metadata():
@@ -55,13 +60,16 @@ def test_dockerfile_copies_license_before_package_install():
     assert "LICENSE" in lines[copy_line_number]
 
 
-def test_readme_links_real_demo_assets_and_walkthrough():
+def test_readme_uses_session_references_without_embedded_images():
     readme = README.read_text(encoding="utf-8")
     demo_doc = DEMO_DOC.read_text(encoding="utf-8")
 
     assert "[Product Tour](#product-tour)" in readme
-    assert "docs/assets/board-inspector-demo.jpg" in readme
-    assert "docs/assets/query-trace-demo.jpg" in readme
+    assert "019f23d0-0140-7291-aab1-5db5180e26f1" in readme
+    assert "019f2818-a451-7461-ab81-911ae5acf5d1" in readme
+    assert "![" not in readme
+    assert "docs/assets/board-inspector-demo.jpg" not in readme
+    assert "docs/assets/query-trace-demo.jpg" not in readme
     assert "[Demo Walkthrough](docs/demo.md)" in readme
     assert BOARD_DEMO_IMAGE.is_file()
     assert BOARD_DEMO_IMAGE.stat().st_size > 10_000
@@ -103,9 +111,8 @@ def test_doctor_script_is_documented_and_read_only():
     script = DOCTOR_SCRIPT.read_text(encoding="utf-8")
     smoke = SMOKE_SCRIPT.read_text(encoding="utf-8")
 
-    assert "bash scripts/doctor.sh --docker" in readme
-    assert "bash scripts/doctor.sh --bare-metal" in readme
-    assert "bash scripts/doctor.sh" in readme
+    assert "public setup path will" in readme
+    assert "Coming soon." in readme
     assert "bash scripts/doctor.sh --docker" in demo_doc
 
     assert "Usage:" in script
