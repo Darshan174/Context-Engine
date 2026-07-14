@@ -1,6 +1,103 @@
 # Immediate Context Engine Strengthening Plan
 
-## 2026-07-14 YC Fall 2026 founder-oversight milestone — active
+## 2026-07-14 deterministic project compiler P1 — completed
+
+### Product outcome
+
+When a founder prepares an evidence-backed task, Context Engine should identify
+the likely implementation files and relevant tests from deterministic repository
+structure, explain why each file is present, and keep that compiled structure
+current without rebuilding unchanged file/symbol rows.
+
+This slice is not autonomous code review, a complete call graph, or a symbol-heavy
+map. It adds a factual project structure layer beneath task preparation:
+
+`repository snapshot -> incremental file/symbol index -> deterministic edges -> affected code in task pack/inspector`
+
+### Observed baseline
+
+- `RepoIndexer` already scans supported Python and JavaScript/TypeScript files,
+  hashes content, extracts symbols/imports/routes, and persists `CodeFile` and
+  `CodeSymbol` rows.
+- `_persist_frame()` deletes and recreates every file and symbol for a repository
+  on every scan, so stable files lose identity and downstream structure cannot be
+  incrementally maintained.
+- `CodeEdge` exists but production indexing does not populate it and it carries no
+  deterministic-rule evidence.
+- Context-pack file ranking exposes internal reason codes and matched terms, but
+  does not provide related-test paths or a concise user-facing `why this file`.
+- The Project map should remain module-level. File/symbol impact belongs in the
+  selected focus inspector and compiled pack, not as visible graph-node sprawl.
+
+### P1 scope
+
+1. Upsert `CodeFile` by workspace, repository root, and path.
+2. Keep unchanged file/symbol rows when content hashes match; replace symbols only
+   for changed files; remove rows for deleted files.
+3. Generate conservative deterministic edges for supported exact cases:
+   relative/local module imports, route-to-handler ownership, and exact
+   test-to-code name/path matches.
+4. Store edge type, deterministic rule/version, source location/evidence, and
+   repository commit identity; do not create unresolved or guessed edges.
+5. Enrich relevant-file results with concise `why`, edge-backed related tests, and
+   bounded impact paths.
+6. Include affected code in the focused pack manifest and existing inspector after
+   preparation. Keep it collapsed/compact and absent when evidence is unavailable.
+
+### Task ownership
+
+- Contract: `.agent-runs/2026-07-14-kimi-project-compiler-contract-task.md`
+- Schema/reasoning: `.agent-runs/2026-07-14-qwen-project-compiler-edges-task.md`
+- Implementation: `.agent-runs/2026-07-14-glm-project-compiler-task.md`
+- Product-truth review: `.agent-runs/2026-07-14-xiaomi-project-compiler-review-task.md`
+
+### Release gates
+
+- A repeated unchanged index preserves file and symbol IDs.
+- A changed file replaces only its own symbols and invalidates affected edges.
+- A deleted file and its edges disappear.
+- Every stored edge names a supported deterministic rule and exact source evidence.
+- Focused packs explain relevant files and exact linked tests without claiming a
+  complete call graph.
+- The inspector exposes affected code after preparation without adding a route or
+  map nodes.
+- Focused and full backend/frontend tests, migration tests, production build, and
+  desktop/narrow visual checks pass.
+
+### Stop conditions
+
+Do not infer arbitrary calls with an LLM, index dependency packages, expose all
+symbols on the Project map, add a graph database, or claim exhaustive codebase
+understanding in this slice.
+
+### Implemented outcome
+
+- Repeated unchanged indexing preserves file and symbol identities; changed and
+  deleted files invalidate only their own symbols and affected edges.
+- Exact local-import, syntactic route-owner, and test-path rules store versioned
+  evidence against a repository snapshot fingerprint.
+- Focused packs expose bounded `affected_code.v1` output in the existing
+  inspector, collapsed by default and omitted when unsupported.
+- Objective ranking ignores unrelated dirty files and provider boilerplate. The
+  live Issue #4 check narrowed the UI from eleven noisy paths to the single
+  evidence-backed CI workflow.
+
+### Remaining follow-ons
+
+- Exact test-to-symbol links are not implemented; current test links are exact
+  path/name rules at file-module level.
+- PostgreSQL migration execution, rollback/concurrency fixtures, and broader
+  adversarial parser coverage remain release-hardening work.
+
+### Verification
+
+- Backend: `500 passed`.
+- Frontend: `59 passed`; production Vite build passed.
+- Ruff and `git diff --check` passed.
+- Browser: real Issue #4 preparation, desktop and 390px inspector, dark and
+  light themes, and zero horizontal overflow verified.
+
+## 2026-07-14 YC Fall 2026 founder-oversight milestone — completed
 
 ### End product
 
@@ -50,7 +147,7 @@ without a deterministic observation that supports the wording.
 
 ### Execution order and task ownership
 
-#### Slice 0 — contract and dependency gate
+#### Slice 0 — contract and dependency gate — completed
 
 Task file: `.agent-runs/2026-07-14-kimi-founder-oversight-contract-task.md`
 
@@ -59,7 +156,7 @@ acceptance fixtures before implementation. In particular, distinguish `not
 attempted`, `no completion evidence`, `failed verification`, `blocked`, and
 `verified`; never collapse them into an inferred `ignored` state.
 
-#### Slice 1 — focused task and observed run loop
+#### Slice 1 — focused task and observed run loop — completed
 
 Task file: `.agent-runs/2026-07-14-glm-founder-oversight-loop-task.md`
 
@@ -78,7 +175,7 @@ Implement the first end-to-end path:
 - show current focus and the latest observed outcome without reintroducing a large
   preparation form or a new top-level page.
 
-#### Slice 2 — deterministic founder scrutiny
+#### Slice 2 — deterministic founder scrutiny — completed
 
 Task file: `.agent-runs/2026-07-14-qwen-founder-scrutiny-task.md`
 
@@ -97,7 +194,7 @@ finding details in the existing inspector/run timeline. `Challenge agent` may
 generate questions only from these findings and must cite the triggering pack item,
 observation, or source record. Findings are not autonomous code-quality verdicts.
 
-#### Slice 3 — independent product-truth review
+#### Slice 3 — independent product-truth review — completed
 
 Task file: `.agent-runs/2026-07-14-xiaomi-founder-oversight-review-task.md`
 
