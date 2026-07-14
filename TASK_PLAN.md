@@ -1,0 +1,780 @@
+# Immediate Context Engine Strengthening Plan
+
+## 2026-07-14 YC Fall 2026 founder-oversight milestone — active
+
+### End product
+
+Context Engine is the source-backed project-state and scrutiny layer for AI-built
+software. It gives a founder a bird's-eye view of what agents changed, left
+incomplete, failed to verify, or supplied no completion evidence for; prepares the
+next agent with exact project context; and updates that context from the observed
+outcome.
+
+This milestone is not a generic memory, agent harness, or code-review product.
+It closes one useful loop around existing harnesses:
+
+`Select evidenced work -> Prepare -> Run -> Observe -> Verify -> Challenge -> Update`
+
+### Observed baseline
+
+- `SourceDocument`, `EvidenceSpan`, `ClaimRevision`, `ContextPack`, `AgentRun`, and
+  `RunObservation` already provide the evidence ledger and run-capture foundation.
+- `/app` is already a calm Project map with one evidence inspector. Sources and
+  Connectors remain supporting surfaces.
+- The selected map card cannot yet become the explicit focus of a task pack.
+  Without a supplied objective, `Copy handoff` produces a generic project snapshot.
+- Runtime outcomes and observations are stored as source evidence, but the normal
+  run-close path does not automatically reconcile every durable outcome into current
+  project state. General runtime writes also lack stable idempotency keys.
+- The repository index stores files and symbols, but it rebuilds stored rows and
+  does not populate production `CodeEdge` relationships.
+- Components have validity windows, but claim revisions are not fully bi-temporal.
+- Digest health and recommended actions exist in backend data, but an opaque score
+  is not adequate founder scrutiny and should not be promoted as truth.
+
+### July 24 application/demo outcome
+
+Optimize for one credible vertical slice, not feature count. A founder must be able
+to:
+
+1. open a project and see current focus, blockers, unverified work, and freshness;
+2. select an evidence-backed task, requirement, decision, or blocker;
+3. prepare a source-backed pack for an existing coding-agent harness;
+4. observe the resulting files, checks, blockers, and completion claim;
+5. see exactly which required work lacks completion evidence;
+6. challenge the agent with evidence-backed questions before accepting the work.
+
+The demo is successful only if every warning and question links to evidence. It
+must not use vague LLM judgements such as `slop`, `bad code`, or `agent ignored this`
+without a deterministic observation that supports the wording.
+
+### Execution order and task ownership
+
+#### Slice 0 — contract and dependency gate
+
+Task file: `.agent-runs/2026-07-14-kimi-founder-oversight-contract-task.md`
+
+Define the exact schema/API/UI contract, truth vocabulary, migration order, and
+acceptance fixtures before implementation. In particular, distinguish `not
+attempted`, `no completion evidence`, `failed verification`, `blocked`, and
+`verified`; never collapse them into an inferred `ignored` state.
+
+#### Slice 1 — focused task and observed run loop
+
+Task file: `.agent-runs/2026-07-14-glm-founder-oversight-loop-task.md`
+
+Implement the first end-to-end path:
+
+- let a supported selected component become a task-pack focus without introducing
+  a universal new WorkItem abstraction;
+- record whether the objective came from trusted human input or an explicit source
+  record, and never infer a task objective from arbitrary project evidence;
+- make runtime event writes retry-safe and preserve source-first ingestion;
+- reconcile durable terminal outcomes, verification results, blockers, and patch
+  summaries through the normal evidence pipeline;
+- expose a compact, source-backed run timeline;
+- add `Prepare for agent` to the selected-card inspector;
+- rename the generic no-objective toolbar action to `Copy project brief`;
+- show current focus and the latest observed outcome without reintroducing a large
+  preparation form or a new top-level page.
+
+#### Slice 2 — deterministic founder scrutiny
+
+Task file: `.agent-runs/2026-07-14-qwen-founder-scrutiny-task.md`
+
+Build a small rule engine over context-pack requirements and run observations. The
+first supported findings are:
+
+- required verification missing;
+- verification failed;
+- unresolved blocker;
+- required item has no completion evidence;
+- run outcome conflicts with its recorded checks;
+- provider or repository state is too stale to support a current-state claim.
+
+The UI representation is a compact `Attention` summary on the Project map and
+finding details in the existing inspector/run timeline. `Challenge agent` may
+generate questions only from these findings and must cite the triggering pack item,
+observation, or source record. Findings are not autonomous code-quality verdicts.
+
+#### Slice 3 — independent product-truth review
+
+Task file: `.agent-runs/2026-07-14-xiaomi-founder-oversight-review-task.md`
+
+Audit the finished vertical slice from a non-technical founder's perspective. Verify
+that the main workflow is discoverable, warnings are understandable, evidence is
+one action away, and no internal graph/compiler machinery pollutes the primary UI.
+Codex owns all integration decisions and final verification.
+
+### User-facing placement contract
+
+| Capability | User-facing placement | Do not expose |
+| --- | --- | --- |
+| Current focus, blocker/unverified/drift counts, freshness | Project bar and a compact Attention summary | Ranking weights or graph internals |
+| Prepare a selected task | Existing evidence inspector | A new permanent Prepare page |
+| Files changed, checks, blockers, outcome | Focus-specific run timeline in the inspector | Raw terminal/tool streams by default |
+| Contradiction and temporal history | Current-truth/history disclosure in the inspector | Validity/transaction database fields |
+| Code impact and relevant tests | Affected-code section in the inspector and context pack | Every symbol as a map node |
+| Evidence-backed agent questions | Challenge action beside a finding/run | Uncited free-form criticism |
+| Retrieval, idempotency, ACL checks, code edges | Internal services and manifest evidence | User-facing mode/configuration controls |
+| Verified procedures | Collapsed `Known playbook` in a relevant future pack | A new Procedures navigation area |
+
+Every user-facing addition must answer either `What should I understand?` or `What
+should I do next?`. Infrastructure is complete when it improves those outputs, not
+when it gains a dashboard card.
+
+### Follow-on slices after the vertical loop passes
+
+#### P1 — deterministic project compiler
+
+- Populate factual import/reference/route/model/test-to-code `CodeEdge` records for
+  supported Python and TypeScript/JavaScript constructs.
+- Upsert by repository, path, and content hash instead of deleting the full index.
+- Reparse changed files and invalidate only affected reverse dependants.
+- Bind compiled artifacts to commit SHA and explain `why this file` in task packs.
+- Keep the Project map module-level; show symbols and dependency paths only on
+  inspection.
+
+#### P1 — complete bi-temporal project truth
+
+- Add explicit validity windows to claim revisions and make transaction/observation
+  time semantics unambiguous.
+- Close old validity windows rather than deleting or silently replacing history.
+- Preserve unresolved conflicts when authority and evidence do not establish a
+  winner.
+- Verify volatile facts such as Git HEAD, PR/issue state, and latest checks before
+  using them as current truth; store the verification as a new source revision.
+- Expose human wording such as `Current`, `Superseded`, `Conflicting`, and `Verified
+  3 minutes ago`, not retrieval-mode controls.
+
+#### P2 — open loops, procedures, and shared-workspace permissions
+
+- Expand open-loop rules only after measured precision on real runs. Persist them
+  only when users need dismiss/assign/resolution state.
+- Extract a procedure only from a completed, verified, secret-redacted run and
+  require repetition or human approval before presenting it as a known playbook.
+- Add principal/ACL provenance and pre-retrieval filtering before positioning the
+  product for shared hosted teams. Workspace scoping remains sufficient for the
+  initial solo-founder wedge.
+
+### Evaluation and release gates
+
+- Maintain a real-task fixture set containing expected files, requirements,
+  blockers, citations, forbidden stale facts, and required verification commands.
+- Measure task completion, relevant-file recall, citation validity, stale leakage,
+  context tokens, manual corrections, and verification pass rate.
+- Initial feedback is logged for review; ranking weights do not self-modify from a
+  tiny sample.
+- Focused backend and frontend tests pass for each slice.
+- Full backend/frontend suites and production build pass before the milestone is
+  called complete.
+- Live desktop and narrow-width checks prove the primary action and findings are
+  discoverable without crowding the map.
+- The final report separates `Observed`, `Implemented`, `Proposed`, and `Not
+  implemented yet`, and includes changed files, tests, evidence, risks, and gaps.
+
+### Stop conditions
+
+Do not add connector breadth, a graph database, autonomous provider writes, a
+chat-first shell, a generic readiness score, visible symbol sprawl, or free-form
+AI code criticism while the focused founder-oversight loop is incomplete.
+
+## 2026-07-13 Meshery backend learnings — completed
+
+### Objective
+
+Finish the useful non-UI lessons from Meshery without duplicating infrastructure
+that Context Engine already has. This pass strengthens the graph as a trusted,
+source-backed projection; Cytoscape, decorative canvas work, provider webhooks,
+and connector scheduling remain separate later work.
+
+### Observed baseline
+
+- Immutable source revisions, durable sync jobs, incremental/rebuild projection,
+  relationship origin/evidence fields, and a graph-slice endpoint already exist.
+- The current graph-slice endpoint is not a real focused slice: `max_hops` is
+  unused, workspace/focus/cap inputs are absent, and relationship status is not
+  filtered.
+- Ingestion can invent template relationship evidence and can label an edge
+  deterministic from its type alone.
+- Digest-time noise filters hide malformed AI fragments after persistence, but
+  there is no shared pre-persistence semantic-fact gate.
+
+### Work plan
+
+1. **Completed** — audit graph queries, relationship truth, ingestion quality,
+   source revisions, and reconciliation behavior; exclude already-implemented
+   infrastructure and parked connector/UI work.
+2. **Completed** — implemented a workspace-scoped, bounded, focal N-hop graph
+   slice with explicit edge status/origin filters and conservative proposed-edge
+   defaults.
+3. **Completed** — rejected relationships without source evidence, derived origin
+   from the extraction path as well as the relationship type, preserved qualified
+   cross-repository GitHub references, and report rejected edges without rewriting
+   raw sources.
+4. **Completed** — rejected malformed semantic fragments before Component creation,
+   preserve the raw SourceDocument, and expose reasoned quality counts.
+5. **Completed** — exposed projection reconciliation health (pending current
+   revisions, historical active projections, and dangling relationships) in
+   graph-build results.
+6. **Completed** — added focused adversarial/API/build tests, ran the complete backend
+   suite, and perform an independent truth/OSS review.
+
+### Acceptance gates
+
+- A focused slice never crosses workspace scope, respects `max_hops`, is bounded,
+  and never returns rejected or superseded edges.
+- Proposed/AI edges are opt-in for focused retrieval; persisted origin is never
+  guessed from confidence.
+- A relationship without evidence is rejected and counted; no template
+  text is manufactured as provenance.
+- Bare GitHub issue references resolve only inside the source repository, while
+  qualified `owner/repository#number` references resolve against that repository.
+- Malformed instruction/media/session fragments do not become Components, while
+  their raw SourceDocument remains intact and inspectable.
+- Graph-build output distinguishes a completed run from a consistent projection.
+- Focused tests and the full backend suite pass.
+
+> **Current product direction (2026-07-13):** The project-map simplification
+> below supersedes earlier frontend language in this file about making a manual
+> objective form the primary app surface. The compiler remains the only handoff
+> engine, but preparation is now a one-click outcome from the source-backed map.
+
+## 2026-07-13 project-map simplification — completed
+
+1. **Completed** — replaced Prepare, Dashboard, Agents, and the legacy graph
+   surface with Project, Sources, and Connectors as the primary navigation.
+2. **Completed** — made local repository intake establish a single active
+   boundary and emit deterministic `local_repository` source evidence for the
+   repository root and top-level system areas.
+3. **Completed** — implemented shared repository/path/commit relevance for the
+   digest and compiler; unknown and different-project sessions remain visible
+   as quiet roots but cannot drive project facts or context packs.
+4. **Completed** — rebuilt the map around System, AI sessions, Direction,
+   Delivery, Risks, Checks, and Next, using only source-backed relationships,
+   searchable quiet records, one evidence inspector, and accessible controls.
+5. **Completed** — routed Copy handoff through `context_pack.v2` prompt-risk and
+   truth filters; project-snapshot purposes cannot become observed objectives.
+6. **Completed** — removed legacy Cytoscape/animation dependencies and dead UI
+   assemblies; aligned demo, Docker project mounting, and launch documentation.
+7. **Completed** — passed 465 backend tests, 41 frontend tests, production build,
+   Ruff, Compose config validation, and diff checks.
+
+## Objective
+
+Execute the technical, architectural, and usability goals from Codex task
+`019f48d9-b816-74d3-a559-002353eb2608` now. Calendar estimates are deliberately
+removed. Work advances only when its acceptance gates pass.
+
+The canonical product is a tool-agnostic context compiler that turns changing
+project evidence into a reproducible, source-backed execution packet and records
+whether that packet helped an agent complete its objective.
+
+The product loop is:
+
+`Capture -> Compile -> Run -> Verify -> Learn`
+
+`context_pack.v2` is the only user-facing context artifact. The knowledge graph
+is a provenance and explainability projection over current evidence, not a
+separate source of truth.
+
+## Non-negotiable invariants
+
+- Raw source history is append-only. A changed provider object creates a new
+  revision; prior evidence remains addressable.
+- A claim is never `verified` unless its evidence text occurs at the recorded
+  source range and its hash matches.
+- Current truth is derived from evidence/claim revisions and exposes historical,
+  contested, stale, and unknown states honestly.
+- Relationships remain optional and require explicit evidence or a deterministic
+  rule.
+- Every selected pack item has inspectable provenance. Code context is bound to
+  a repository state and file hash where available.
+- The final rendered artifact must fit the requested token budget. Health cannot
+  be perfect when required context, relevance, or provenance is unknown.
+- HTTP, CLI, MCP, and frontend use the same compiler and `context_pack.v2`
+  contract.
+- Existing user edits in the landing page and digest board are preserved unless
+  integration explicitly requires compatible changes.
+- No connector, model capability, or benchmark result is claimed without tested
+  behavior.
+
+## Execution slices and ownership
+
+### Agent 1 — Kimi contract and dependency gate
+
+Task file: `.agent-runs/2026-07-10-kimi-contract-task.md`
+
+Produce a current-state contract, schema decisions, acceptance tests, and merge
+order before the backend slices are integrated. This agent changes only its
+contract artifact.
+
+### Agent 2 — GLM evidence ledger and temporal truth
+
+Task file: `.agent-runs/2026-07-10-glm-evidence-task.md`
+
+Fix false evidence verification; implement append-only source revisions and
+changed-content sync semantics; preserve provenance and migration safety; add
+focused adversarial tests.
+
+### Agent 3 — Qwen compiler integrity and context lockfile
+
+Task file: `.agent-runs/2026-07-10-qwen-compiler-task.md`
+
+Make `context_pack.v2` consume trustworthy evidence, improve objective-conditioned
+retrieval, enforce rendered budgets and meaningful health, persist audit fields,
+and add replay/diff-ready lockfile metadata with tests.
+
+### Agent 4 — Xiaomi independent UX/OSS review
+
+Task file: `.agent-runs/2026-07-10-xiaomi-review-task.md`
+
+After implementation, audit the complete loop for stale claims, unsupported
+promises, weak first-run behavior, provenance gaps, and missing tests. Changes are
+limited to documentation and clearly safe copy/test corrections unless Codex
+assigns a follow-up.
+
+### Codex — integration owner
+
+Codex owns task splitting, frontend product unification, cross-slice conflict
+resolution, final architecture decisions, and all verification. The frontend
+default becomes objective-first context preparation backed by
+`POST /api/context/prepare`; Graph, Ask, Sources, Changes, and Connectors become
+inspection/support surfaces.
+
+## Dependency order
+
+1. Record the contract and baseline behavior.
+2. Land evidence correctness and migration guarantees.
+3. Land compiler provenance/retrieval/budget guarantees.
+4. Unify the frontend on the compiler artifact.
+5. Add/verify outcome capture and replay/diff seams supported by current data.
+6. Run the independent UX/OSS review.
+7. Resolve review findings and run the full quality gate.
+
+Parallel work is allowed only when file ownership does not overlap. Agents must
+not rewrite unrelated user changes.
+
+## Completion gates
+
+### Evidence correctness
+
+- An LLM fact whose claimed excerpt does not occur in the source cannot receive
+  a verified evidence span.
+- A changed external object is ingested as a new immutable revision and can be
+  selected as current without deleting the previous revision.
+- Unchanged content is idempotent.
+- Source hashes always match stored content.
+- SQLite migration is repeatable and preserves existing rows.
+
+### Compiler correctness
+
+- Selected evidence-backed items carry source document and evidence span IDs.
+- Objective-relevant core files beat broad filename/test-token matches in a
+  regression fixture.
+- Required items cannot silently overflow the final rendered token budget.
+- Health reflects missing required context, retrieval confidence, provenance,
+  blockers, and contradictions; unknown relevance cannot score 100.
+- Stored pack items contain enough audit data to reproduce selection/exclusion
+  decisions.
+- The manifest records compiler/ranking versions, target model capability,
+  repository state, token accounting, and exact exclusions.
+
+### Product-loop correctness
+
+- A user can enter an objective, repository path, target model, and budget from
+  the main application surface and receive persisted `context_pack.v2` output.
+- The UI shows definition of done, selected context, blockers/uncertainties,
+  verification commands, citations, exclusions, health, and copyable markdown
+  when supplied by the compiler.
+- No frontend path creates or labels a `context_packet.v1` as the canonical
+  handoff.
+- No fake activity or visually asserted unsupported graph edge is shown as live
+  truth.
+- Empty, loading, validation, server-error, and success states have focused tests.
+
+### Outcome/evaluation correctness
+
+- The existing run/outcome model can associate a run with its exact pack and
+  repository result, or the remaining schema gap is explicitly implemented.
+- Compiler evaluation invokes the real compiler against reproducible fixtures;
+  it does not score only a hand-written manifest.
+- Evaluation reports citation validity, stale leakage, budget compliance, and
+  retrieval relevance in addition to schema conformance.
+- Claims about model lift remain `Not implemented yet` until paired agent runs
+  exist; benchmark scaffolding must not be presented as a result.
+
+## Quality gate
+
+- Focused backend tests for each changed contract pass.
+- Full `pytest -q` passes.
+- Focused frontend tests pass.
+- Full frontend test suite passes.
+- `npm run build` passes.
+- Migration repeatability is tested.
+- A live or equivalent end-to-end prepare flow is exercised.
+- Final report separates `Observed`, `Implemented`, `Proposed`, and
+  `Not implemented yet`.
+- Final report includes changed files, tests, evidence, risks, and remaining gaps.
+
+## Stop conditions
+
+Do not expand connector count, generic dashboard analytics, decorative graph
+work, or unsupported model profiles while a completion gate above is failing.
+
+## 2026-07-10 finalization pass
+
+The implementation is published in draft PR #67. Four independent agents now
+audit it against the contract before Codex marks the work finished:
+
+1. Contract/acceptance audit: map every completion gate to code and tests and
+   report only evidence-backed gaps.
+2. Backend invariant audit: review source revisions, migration repeatability,
+   exact evidence verification, compiler provenance/budget/health, and MCP run
+   outcomes for correctness and isolation bugs.
+3. Frontend/product audit: review the objective-first prepare flow, error and
+   empty states, accessibility, misleading truth claims, and canonical artifact
+   usage.
+4. OSS/integration audit: review documentation accuracy, packaging/CI readiness,
+   diff cleanliness, and remaining unsupported claims after the first three
+   reports.
+
+Agents are review-only during the parallel pass. Codex owns fixes, conflict
+resolution, final full-suite verification, and updates to PR #67.
+
+## 2026-07-10 landing UI alignment
+
+### Objective
+
+Carry the landing page's restrained, evidence-first visual system into the
+application shell and product pages without changing product behavior or
+overstating live data.
+
+### Work plan
+
+1. **Completed** — audited the landing page and application routes for shared
+   visual primitives, responsive behavior, and existing user changes.
+2. **Completed** — aligned the shell, reusable controls, and selected route
+   surfaces with the landing palette, typography, spacing, and honest states.
+3. **Completed** — ran focused and full frontend coverage plus a production
+   build. The in-app browser could not connect to the host's Vite preview, so
+   visual verification remains limited to source review and compiled UI checks.
+
+## 2026-07-10 in-app UX refinement
+
+### Objective
+
+Move beyond palette alignment and improve the internal product's navigation,
+information hierarchy, and first-run experience while preserving all existing
+data contracts and graph behavior.
+
+### Work plan
+
+1. **Completed** — replaced the crowded desktop header with grouped,
+   responsive navigation and persistently reachable workspace/theme controls.
+2. **Completed** — made Sources inventory-first and Connectors state-first, with
+   compact summaries and progressive disclosure for setup/import actions.
+3. **Completed** — aligned onboarding and shared loading/error/empty states with the
+   flat paper/ink/lime component system.
+4. **Completed** — ran focused/full frontend verification, production build,
+   diff checks, and live 1280px/390px browser checks without page overflow.
+
+## 2026-07-10 graph truth and workspace relevance rebuild
+
+### Objective
+
+Make the Graph route an evidence-backed view of the selected workspace. Every
+visible session, decision, pull request, issue, blocker, and document warning
+must be traceable to a current source record or be clearly labelled as unknown,
+stale, or unavailable. The graph must not invent a workspace objective when no
+objective has been supplied.
+
+### Observed baseline
+
+- `POST /api/graph/build` processes only `SourceDocument` rows whose
+  `processed_at` is null; it does not rebuild existing components.
+- The same operation runs relationship inference over existing components, so
+  its current `relationships_inferred` result is not proof that sources were
+  refreshed.
+- GitHub freshness depends on a separate connector sync. The graph button does
+  not currently fetch current PR or issue state.
+- The digest frontend classifies PRs, issues, blockers, and broken documents
+  from card text and URLs. These categories are presentation heuristics rather
+  than explicit factual contracts.
+- AI-session cards omit the identifying metadata and evidence needed to judge
+  workspace relevance or inspect the session's contents.
+
+### Work plan
+
+1. **Completed** — defined the graph rebuild/freshness/workspace contract and
+   focused acceptance tests.
+2. **Completed** — implemented explicit build modes and honest processing,
+   refresh, supersession, and warning information.
+3. **Completed** — made digest categories source-typed and provenance-first;
+   exclude unsupported or ambiguous cards from categorical panels.
+4. **Completed** — added session identity, tool, timestamps, workspace/repository
+   relevance, objective evidence, and inspectable excerpts.
+5. **Completed** — redesigned the board for clear empty/unknown/stale states,
+   smoother navigation, and a collapsible application sidebar.
+6. **Completed** — ran focused and full backend/frontend verification, then the
+   graph-model and OSS/UX reviews required by `AGENTS.md`.
+
+## 2026-07-11 graph readability recovery
+
+### Objective
+
+Restore the Graph route as a readable project-state story without weakening the
+truthfulness work already completed. The default view must help a solo builder
+understand which AI sessions produced which decisions, how those decisions
+connect to PRs and issues, and what blockers or document problems remain.
+
+### Constraints
+
+- Preserve current source typing, workspace relevance, imported provider state,
+  objective honesty, and evidence inspection contracts.
+- Default to a stable overview layout; pan and zoom support exploration but must
+  not be required to read the primary story.
+- Show sessions, decisions, PRs/issues, blockers, and broken/stale docs as the
+  primary lanes. Hide secondary evidence behind selection or overflow controls.
+- Keep controls compact and outside the main reading path.
+- Never invent missing relationships or label unknown provider state as current.
+- Follow the user-supplied reference interaction model: stacked AI sessions feed
+  a decision hub, then branch to PRs, issues/blockers, document findings, and
+  the next agent task; include compact search/filter/layout controls, minimap,
+  legend, quick-peek drawer, and fit/zoom/lock controls where supported.
+- Treat light and dark modes as separately tuned palettes with equivalent
+  contrast, hierarchy, and semantic node colours.
+
+### Work plan
+
+1. **Completed** — audited the current projection and rendered hierarchy against
+   task `019f4cfe-f6d7-7a80-b727-c3011aa08252` and the subsequent redesign.
+2. **Completed** — replaced the generic evidence canvas with a restrained,
+   category-first project-state board and readable progressive disclosure.
+3. **Completed** — added focused projection/component tests for ordering, truncation,
+   empty states, and truthful labels.
+4. **Completed** — ran browser checks at desktop and narrow widths, then full
+   frontend tests and production build.
+5. **Completed** — completed graph/data-model and UX/OSS reviews; resolved findings
+   before reporting completion.
+
+### Follow-up corrections
+
+- **Completed** — verified the graph canvas, cards, semantic group headers, and
+  quick-peek surfaces render with genuinely light backgrounds and dark readable
+  text when light mode is active.
+- **Completed** — verified manual layout moves nodes, lock prevents further
+  movement, and returning to auto layout resets manual offsets.
+- **Completed** — replaced provider/ID session headings with shared,
+  content-derived topics for Codex, Claude Code, and OpenCode, while filtering
+  injected bootstrap, environment, tool, and skill instruction blocks.
+- **Completed** — removed the oversized objective hero and retained objective
+  context in the compact graph toolbar.
+- **Completed** — removed enclosing canvas, group-header, node-card, and empty
+  placeholder borders; hierarchy now comes from spacing, tint, and elevation.
+
+## 2026-07-10 relationship-first graph UX redesign
+
+### Objective
+
+Turn the factual digest graph into a calm, professional evidence map that gives
+the canvas back to the user's project. Preserve the source/provenance contract
+from Codex task `019f4cfe-f6d7-7a80-b727-c3011aa08252`, while applying the
+objective-first and relationship-first direction from the “Context Engine Design
+Ideas” conversation.
+
+### Acceptance contract
+
+- The graph opens with a compact command bar; build, rebuild, scope, and freshness
+  explanations do not permanently cover the upper-left canvas.
+- The default view renders individual evidence records as nodes and draws only
+  supported backend relationships. Decorative paths must remain visually and
+  semantically distinct from factual edges.
+- A supplied objective is visually central. When no objective exists, the UI says
+  so and uses a neutral workspace-evidence anchor rather than inventing one.
+- Selection quiets unrelated nodes and edges, exposes a readable local path, and
+  opens the evidence inspector without hiding the whole map.
+- Graph controls are compact, keyboard accessible, responsive, and use honest
+  labels (`Update graph`, `Rebuild`, imported snapshot, relationship count).
+- Empty and sparse workspaces still explain the next useful action without a
+  large generic placeholder.
+- Focused frontend tests, the full frontend suite, production build, and live
+  desktop/mobile visual checks pass.
+
+### Work plan
+
+1. **Completed** — replaced the fixed board chrome and category wall with a
+   relationship-first evidence map and compact command bar.
+2. **Completed** — refined the evidence inspector, responsive behavior, focus states,
+   and empty/sparse states.
+3. **Completed** — added focused projection/interaction tests and updated graph UX documentation.
+4. **Completed** — ran 72 frontend tests, 46 focused backend graph tests, a production
+   build, and live browser QA in desktop light/dark and 390px mobile layouts.
+
+### Verification result
+
+- Full backend suite: 455 passed; one SQLite datetime-adapter deprecation
+  warning remains outside this graph change.
+- Full frontend suite: 69 passed.
+- Production frontend build: passed.
+- Current local GitHub snapshots confirm PRs #9, #10, #11, and #12 are closed
+  and merged. The new UI renders that snapshot state instead of calling them
+  active.
+- The legacy Issue #12 row points at a pull-request URL. URL/type consistency
+  now demotes that row to supporting evidence instead of duplicating PR #12.
+
+### Acceptance gates
+
+- The Graph UI explains whether Build Context incrementally processed pending
+  evidence or rebuilt existing evidence; zero processed documents is not shown
+  as a successful rebuild.
+- Build Context never implies that GitHub or other remote providers were
+  refreshed unless a connector sync actually ran and returned a timestamp.
+- Only GitHub source documents with explicit item type, number, URL, repository,
+  and state metadata appear as PR or issue cards.
+- Closed or merged GitHub items cannot be labelled active; unknown freshness is
+  visible and never rendered as current fact.
+- Decisions and blockers require a component fact type plus inspectable source
+  evidence. “Broken docs” requires an explicit extracted finding/status, not a
+  frontend keyword match.
+- AI sessions show a stable identifier, tool, import time/session time, source
+  excerpt, and workspace/repository relevance signal. Sessions without enough
+  metadata are labelled as unverified relevance.
+- The board states that no objective is set when no source-backed objective is
+  available; it does not generate one from arbitrary graph content.
+- The desktop sidebar can be collapsed and restored with an accessible control;
+  graph pan/zoom/card inspection remain smooth and keyboard reachable.
+
+## 2026-07-11 context-map viewport correction
+
+### Objective
+
+Make the context map read as one fitted graph canvas: remove nested board sizing and
+page-level graph scrollbars, replace the unlabeled dot matrix with a real structural
+minimap, and keep the graph usable across desktop and narrow viewports.
+
+### Work plan
+
+1. **Completed** — removed fixed inner canvas width and scrolling ownership from
+   the graph surface; fit the graph within the available viewport.
+2. **Completed** — replaced the dot-matrix/legend hybrid with a structural minimap and
+   kept category controls readable without duplication.
+3. **Completed** — added focused regression coverage, ran frontend tests/build, and
+   visually verified the live route at desktop and narrow widths.
+
+### Navigation correction
+
+- **Completed** — restored graph-native navigation after removing the old native
+  scroll surfaces: drag empty canvas space to pan, use wheel/trackpad input to zoom
+  around the pointer, and use Fit to reset pan and zoom.
+- **Completed** — kept node selection and manual node movement isolated from canvas
+  panning, reflected navigation in the minimap viewport, and verified live pointer
+  behavior with focused tests and browser interaction.
+
+## 2026-07-13 project control room simplification
+
+### Objective
+
+Replace the fragmented Prepare, Dashboard, and evidence-graph experience with a
+single calm project control room for AI-native builders. Importing or selecting a
+repository establishes the project scope. The default surface must explain the
+project's current direction, delivery state, risks, and relevant agent activity
+without requiring users to understand compiler configuration or knowledge-graph
+internals.
+
+### Product contract
+
+- `/app` is the project overview and visual map. `/app/dashboard` redirects to it.
+- The execution-brief form is removed from the primary UI. `context_pack.v2`
+  remains an API, CLI, and MCP capability; this change does not weaken the
+  compiler contract.
+- Primary navigation contains only `Project`, `Sources`, and `Connectors`.
+  Ask and Changes remain compatibility routes, not permanent top-level
+  destinations.
+- The visual map uses a small number of meaningful node families and supported
+  evidence relationships. It must show project flow and problems at a glance,
+  not present uniform cards or unexplained graph decoration.
+- Session relevance is determined from workspace/repository identity and source
+  metadata. Relevant, uncertain, and different-project sessions are conveyed by
+  opacity, saturation, and stroke treatment, with accessible labels available
+  on inspection rather than repeated prose on every node.
+- An imported repository or local project path is evidence of project scope. It
+  is not evidence for invented product goals, decisions, or relationships.
+- Sources and Connectors remain available and honest; unsupported provider
+  behavior is out of scope for this slice.
+
+### Work plan
+
+1. **Completed** — audit current navigation, Prepare, Dashboard, graph projection,
+   workspace scope, and session relevance behavior; write the implementation
+   contract and parallel graph/UX reviews.
+2. **Completed** — combine the useful overview information and graph into one default
+   project surface; remove the execution-brief form and redundant navigation.
+3. **Completed** — rebuild graph hierarchy, node semantics, relevance styling,
+   inspector disclosure, empty states, and responsive behavior.
+4. **Completed** — strengthen deterministic project/session relevance using repository
+   path, repository identity, branch, workspace, and imported source metadata while
+   preserving provenance and unknown states.
+5. **Completed** — add focused backend/frontend tests and update product/graph docs
+   with observed, implemented, and not-yet-implemented behavior.
+6. **Completed** — run focused and full tests, production build, and live desktop/mobile
+   browser verification; complete graph/schema and OSS/UX review before handoff.
+
+### 2026-07-13 visual regression correction
+
+- **Completed** — replace percentage-packed node placement with a dimension-aware
+  grid whose lane budgets fit their rendered zones; remove the record-expansion
+  state that could overfill the canvas.
+- **Completed** — suppress generic Slack/channel source hubs and duplicate visual roots
+  from the visual projection while preserving their stored source and relationships.
+- **Completed** — remove punctuation residue from derived titles and summaries while
+  leaving stored source content and provenance identifiers unchanged.
+- **Completed** — simplify the inspector so the useful summary, evidence, and factual
+  connections lead; internal classification/scoring remains secondary.
+- **Completed** — add regression coverage for collisions, comma-prefixed task text,
+  generic channel hubs, and inspector hierarchy; repeat live browser verification.
+
+### Acceptance gates
+
+- A user no longer sees `Execution brief`, target-model, or token-budget fields in
+  the application UI.
+- `/app` presents the selected project and its evidence map without a second
+  Dashboard page or competing primary actions.
+- The graph distinguishes sessions, intent/decisions, delivery work, and
+  risks/verification through visual form and position, not paragraphs of labels.
+- Visually de-emphasized sessions still meet contrast/accessibility requirements
+  when focused or selected, and the inspector exposes the exact relevance state
+  and reasons.
+- `not_relevant` sessions cannot drive project summaries, attention counts, or
+  factual links; `unknown` sessions stay visible but subdued and are never called
+  relevant.
+- Focused backend and frontend tests cover route/navigation removal, visual
+  relevance semantics, deterministic repository matching, unknown/different-project
+  behavior, and provenance retention.
+- Full backend/frontend verification and a production build pass, and the live UI
+  is checked at desktop and 390px widths in light and dark modes.
+
+## 2026-07-13 Context Engine logo integration
+
+### Objective
+
+Adopt the user-supplied circular node-path mark as the Context Engine logo across
+the existing product brand surfaces without changing unrelated product work.
+
+### Work plan
+
+1. **Completed** — translated the supplied raster artwork into a faithful,
+   transparent SVG that remains legible at favicon and navigation sizes.
+2. **Completed** — replaced the shared React mark and browser favicon while preserving
+   existing sizing and layout behavior.
+3. **Completed** — added focused component coverage and verified the frontend tests,
+   production build, and rendered light/dark presentation.
+
+### Acceptance gates
+
+- The landing page, desktop sidebar, mobile header, and favicon use the new mark.
+- The mark preserves the circular boundary, connected black nodes, and single red
+  node from the supplied artwork.
+- The component remains decorative where adjacent text supplies the accessible
+  name and does not create duplicate screen-reader output.
+- Focused frontend tests and the production build pass.
