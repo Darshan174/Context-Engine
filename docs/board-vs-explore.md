@@ -1,84 +1,81 @@
-# Evidence Graph Route
+# Project Map
 
-`/app/graph` is the selected-workspace evidence graph. It is a projection over
-imported `SourceDocument` revisions; it is not a provider client and it is not a
-workspace objective generator.
+`/app` is the selected workspace's project map. It is the primary product
+surface, replacing the separate Prepare, Dashboard, Board, and Explore pages.
+It projects imported `SourceDocument` revisions and repository scope; it is not
+a provider client and it does not invent project intent.
+
+The old `/app/dashboard` and `/app/graph` URLs redirect to `/app` for existing
+links. Ask and Changes remain compatibility routes, while Sources and
+Connectors remain primary navigation destinations.
 
 ## Observed behavior
 
-- A compact command bar names the selected workspace and reports the visible
-  record/relationship count without permanently covering the canvas.
-- The objective is a distinct task-focus anchor when one has been supplied. When
-  it has not, the anchor says so and does not infer intent from imported history.
-- Individual source-backed records are arranged into `Sources`, `Intent`,
-  `Delivery`, and `Risk & verification` lanes. Lanes are navigation structure,
-  not factual relationships.
-- `Update graph` processes pending current source revisions.
-- `Rebuild` re-extracts the current imported revisions and reconciles their
-  derived components. It lives in the graph-actions menu, with the longer
-  snapshot explanation and scope/freshness detail hidden until requested.
-  Historical source revisions remain addressable.
-- Neither graph action contacts GitHub or another provider. `Refresh sources`
-  is a separate connector operation.
-- Pull requests and issues appear in their named panels only when backend
-  classification has typed provider metadata. Their state is described as an
-  observation at the last successful sync, not as live state.
-- An AI-session card represents one imported session root. It shows its tool,
-  stable session identifier, available repository/cwd and branch context,
-  timing/message metadata, and workspace-relevance status.
-- Decisions and blockers require a typed component plus exact source evidence.
-  Agent-session suggestions remain supporting evidence unless explicitly
-  confirmed by a human source.
-- The document-finding panel remains explicitly unverified until a structured
-  document-health extractor emits a supported finding.
-- Selecting a record quiets unrelated records, labels its local relationship
-  paths, and opens the inspector. The inspector shows classification,
-  status, source snapshot, evidence excerpt, session/provider metadata,
-  visible factual relationships, and the imported source content.
-
-## Relationship display
-
-The canvas draws only links included by the backend digest. The backend includes
-only deterministic, extracted, or human-verified relationships that contain
-evidence. Proposed relationships are not drawn as facts. Relationship-connected
-records receive visual priority when the 24-node canvas budget is exceeded; the
-number of lower-priority hidden records remains visible.
-
-Edges remain quiet until a record is selected. The selected record's one-hop
-neighborhood stays prominent and relationship labels become visible. Blocking
-and contradiction edges use the risk color; other factual edges remain neutral.
+- A workspace without a project boundary asks for one absolute local repository
+  path. `POST /api/repo/index` validates and persists the repository index.
+- A configured GitHub repository also establishes a project identity. The
+  digest exposes normalized `project_paths` and `project_repositories` values.
+- Local repository intake creates a trusted `local_repository` source revision
+  with deterministic repository-root and top-level-area components. The System
+  zone therefore appears before any external source or AI session is imported.
+- Once the boundary exists, the map arranges source-backed records into AI
+  sessions, system, direction, delivery, risks, checks, next steps, and supporting
+  evidence. These zones are visual grouping, not factual relationships.
+- The canvas draws only links returned by the backend digest. Selecting a node
+  quiets unrelated records, labels its sourced one-hop links, and opens a single
+  evidence inspector.
+- AI-session relevance is conveyed on the canvas through saturation, opacity,
+  and border style. Relevant sessions are solid and prominent; unknown sessions
+  are quieter and dotted; different-project sessions are faint, grayscale, and
+  dashed. The inspector exposes the deterministic reasons to assistive
+  technology and users who select the session.
+- Unknown or different-project session roots remain visible as imported
+  evidence, but their derived components do not contribute to project health,
+  recommendations, clusters, or factual links.
+- Incremental refresh processes pending imported snapshots. Rebuild re-extracts
+  current snapshots. Neither operation contacts GitHub or another provider;
+  provider refresh remains a Connector action.
+- Pull requests and issues are shown only when typed provider metadata supports
+  the classification. Their state is an imported snapshot, not claimed live
+  provider state.
+- Decisions and blockers require typed components and exact source evidence.
+  Agent suggestions remain supporting evidence unless explicitly confirmed.
 
 ## Interaction and accessibility
 
-- Pointer pan and pinch/wheel zoom stay inside the graph surface.
-- `+`/`-` zoom, `0` reset, arrow-key pan, fit, and reset controls are available
-  when the graph region
-  has focus.
-- Evidence records and graph actions are keyboard selectable. `Escape` clears a
-  local focus or closes graph popovers.
-- Mobile opens centered between the Intent and Delivery lanes while preserving
-  pan access to the complete evidence surface.
-- The desktop application sidebar can collapse to its icon rail while keeping
-  accessible navigation names and workspace/theme access.
+- Pointer drag pans; wheel or trackpad input zooms inside the map.
+- The compact zoom controls and Fit action reset orientation without a minimap
+  or layout-mode chooser.
+- Search visually quiets non-matching records without hiding provenance.
+- **Copy handoff** compiles and persists `context_pack.v2`, then copies its
+  Markdown. Compiler prompt-injection, evidence, truth-state, and relevance
+  exclusions remain in force. A system-generated project-snapshot purpose is
+  recorded separately and is never surfaced as a user-supplied objective.
+- Evidence nodes and actions are keyboard selectable. `Escape` clears the
+  selected node or closes the action menu.
+- Relevance remains available in accessible node names and the inspector even
+  though no relevance labels clutter the canvas.
 
 ## Not implemented yet
 
-- A live provider-state stream inside the graph.
-- Automatic repository matching for every imported session. Missing comparable
-  metadata is reported as `Relevance unverified`.
+- Semantic relevance for sessions that lack a deterministic repository, path,
+  or commit match. Those sessions remain `unknown`.
+- A canonical, human-approved project-intention model inferred from imported
+  history.
+- Capability mapping, product-gap detection, broken-component diagnosis, or a
+  code-slop detector.
 - A validated broken-document crawler.
-- A server-authored `task_map.v1` projection with compiler selection/exclusion and
-  explicit gap nodes. The current client projection consumes the evidence digest,
-  sourced objective, and factual links.
-- Multi-hop path controls beyond the current one-hop selection focus.
+- A live provider-state stream inside the map.
+- Explicit capability-gap and broken-component nodes derived from verified
+  implementation evidence.
 
 ## Anti-hallucination rules
 
-- Do not classify panels from title keywords or URL regexes in the frontend.
-- Do not call a graph-row lifecycle status a GitHub provider state.
-- Do not call a provider snapshot current without a successful sync timestamp.
-- Do not display historical source revisions as current projection rows.
-- Do not infer an objective from sessions, issues, PRs, graph topology, or
+- Do not classify zones from title keywords or URL patterns in the frontend.
+- Do not draw decorative or inferred edges as facts.
+- Do not call graph-row lifecycle status a GitHub provider state.
+- Do not call a provider snapshot current without item-level observation proof.
+- Do not infer an objective from sessions, issues, pull requests, topology, or
   attention ranking.
-- Do not promote an assistant recommendation to a workspace decision without
-  explicit human confirmation.
+- Do not promote an assistant recommendation to a project decision without
+  explicit confirmation.

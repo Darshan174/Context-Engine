@@ -6,12 +6,33 @@
 > **Agent:** Kimi K2.6  
 > **Date:** 2026-05-04
 
-> **Current status note, refreshed 2026-06-18:** This is a historical contract
-> review, not launch copy. Several proposed items below are now implemented:
-> relationship `origin`, component `provenance`/`excerpt`, deterministic GitHub
-> issue/PR extraction, deterministic agent-session extraction, evidence-backed
-> inferred relationships, Board/Explore graph UX, Work/Gaps lens presets, and
-> selection-scoped context packs.
+> **Historical status, superseded 2026-07-13:** This document preserves an old
+> design review and its line-level evidence; paths and UI claims below may no
+> longer describe the active tree. The Board/Explore, Work/Gaps, minimap, and
+> Agents-page UI were removed. See `docs/board-vs-explore.md` for the implemented
+> Project map and `docs/context-pack-v2.md` for the active handoff contract.
+
+## 2026-07-13 active graph-truth addendum
+
+- `deterministic` is assigned only by a deterministic extraction/rule path. An
+  LLM relationship never becomes deterministic because of its type or confidence.
+- Ingestion no longer manufactures template relationship evidence. A resolved
+  edge without non-empty evidence is rejected from the projection and counted in
+  graph-build quality output; the raw SourceDocument remains unchanged.
+- GitHub relationship extraction preserves repository-qualified issue references.
+  Bare `#number` targets are repository-local; `owner/repository#number` targets
+  are resolved only against the explicitly named repository.
+- `POST /api/graph/slice` requires a workspace and one or more focal components,
+  traverses at most two hops, caps nodes/edges, uses only current source revisions,
+  and excludes proposed/AI edges unless explicitly requested.
+- Graph-build output includes projection reconciliation health. This reports
+  pending current revisions, active historical projections, and dangling edges;
+  it does not claim that an upstream provider was refreshed.
+- A shared pre-persistence semantic quality gate rejects narrow instruction,
+  media, continuation-fragment, progress-narration, and duplicate derived facts.
+  It never deletes or rewrites raw source evidence.
+- Provider webhook delivery, persisted cursors, upstream deletion tombstones,
+  and exact relationship evidence-span joins are not implemented yet.
 
 ---
 
@@ -63,7 +84,10 @@ approve/reject proposed relationships through the review endpoint.
 
 - `process_document` (lines 27–59) calls extractor, creates/upserts components, generates embeddings, and creates relationships.
 - `_upsert_component` (lines 70–104) sets `status = "needs_review"` if `confidence < 0.6`; sets `status = "proposed"` if `temporal == "future"`; sets `status = "needs_review"` if `temporal == "past"`.
-- `_create_relationship` (lines 106–157) skips relationships with `confidence < 0.6`, resolves target by name (same-model preferred, cross-model fallback), prevents duplicates and self-loops, and stores `evidence` (template-generated if absent).
+- `_create_relationship` skips relationships with `confidence < 0.6`, resolves
+  target by identity/name (same-model preferred, cross-model fallback), prevents
+  duplicates and self-loops, and rejects resolved relationships whose extractor
+  supplied no evidence.
 
 **Evidence:** `tests/test_ingestion.py` covers cross-model relationships (lines 13–65), confidence thresholds (lines 109–146), duplicate/self-loop prevention (lines 187–261), temporal status mapping (lines 264–320), and relationship evidence storage (lines 418–496).
 
