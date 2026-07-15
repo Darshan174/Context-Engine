@@ -1,5 +1,35 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-15 product README refresh — completed
+
+### Outcome
+
+- Explain the current product from a founder/user perspective before its internal
+  architecture: project oversight, agent scrutiny, open loops, and agent briefs.
+- Keep every capability statement tied to implemented UI, API, CLI, MCP, or tests.
+- State important limits explicitly, especially that preparation copies a brief
+  but does not launch an agent, and scrutiny is not a generic AI code-quality score.
+- Leave Setup, Deployment, and public self-hosting guidance intentionally unfinished.
+
+### Verification gates
+
+- README links and heading anchors are internally consistent.
+- No connector, agent action, or scrutiny behavior is overstated.
+- Markdown formatting and repository diff checks pass.
+
+### Implemented and verified
+
+- README now leads with the founder-facing product: bird's-eye project state,
+  deterministic scrutiny, durable open loops, source-backed agent briefs, and
+  approved verified playbooks.
+- The product loop, current UI behavior, HTTP/CLI/MCP surfaces, connector auth
+  modes, and repository map reflect the active code paths.
+- Honest limits explicitly cover agent delivery, bounded scrutiny, live retrieval,
+  and unfinished public onboarding.
+- Setup, Deployment, and Contributing remain intentionally unexpanded.
+- All referenced local documentation paths exist; headings were checked;
+  `git diff --check` passed. Tests were not rerun because this is documentation-only.
+
 ## 2026-07-15 agent-brief confirmation UX — completed
 
 ### Outcome
