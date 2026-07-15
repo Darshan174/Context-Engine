@@ -1,5 +1,155 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-15 agent-brief confirmation UX — completed
+
+### Outcome
+
+- After preparation, show what was created, whether it reached the clipboard, and
+  explicitly state that nothing was sent to an agent automatically.
+- Let the user view the generated brief and copy it again without regenerating it.
+- Keep the confirmation inside the existing inspector; add no new page or modal.
+
+### Verification gates
+
+- Success, clipboard-failure, view, copy-again, and reset behavior have focused UI tests.
+- Full frontend tests and production build pass.
+
+### Implemented and verified
+
+- The inspector now shows `Agent brief ready`, clipboard delivery state, an
+  explicit `Nothing was sent automatically` statement, and the number of selected
+  source-backed context items.
+- `View brief` reveals the generated Markdown in-place; `Copy again` reuses the
+  existing brief without another compilation request.
+- Clipboard failure leaves the brief viewable and retryable.
+- Focused inspector tests passed; full frontend `74 passed`; production build and
+  `git diff --check` passed.
+
+## 2026-07-15 project-map eligibility and empty-state repair — completed
+
+### Outcome
+
+- A pull request is shown as delivery evidence, never as an eligible task focus.
+- API failures are rendered as human-readable messages instead of raw JSON.
+- Refreshing the project map also refreshes the deterministic local-repository
+  inventory, so the System lane cannot silently drift behind the indexed files.
+- Empty lanes explain the verified absence they represent; document findings are
+  labelled as Docs, not as generic Checks.
+
+### Verification gates
+
+- Focus policy is shared by compilation and digest presentation.
+- PR and task eligibility have backend regression coverage.
+- Inspector, structured API errors, and empty-lane copy have frontend coverage.
+- Focused backend/frontend tests and the production frontend build pass.
+
+### Implemented and verified
+
+- Digest and compiler now use one focus policy. PR cards are explicitly marked
+  ineligible and the inspector explains that they are delivery evidence.
+- Structured API errors show their message instead of serialized JSON.
+- Project-map refresh reindexes the active local repository before rebuilding the
+  graph. The current Context engine workspace was reindexed to 1 repository root,
+  9 code areas, 267 files, and 4,423 symbols.
+- Empty System, Direction, Next, and Docs lanes use compact truthful copy.
+- Ruff passed; backend `525 passed`; frontend `74 passed`; production build passed;
+  `git diff --check` passed.
+
+## 2026-07-15 remaining roadmap completion — completed
+
+### Product outcome
+
+Finish the previously explicit follow-ons as one truthful learning loop:
+
+`permissioned evidence -> current/historical truth -> indexed/live task context -> observed run -> open loop or verified playbook`
+
+The UI remains the existing Project map and selected-card inspector. New backend
+machinery is exposed only when it answers what changed, what remains open, what a
+future agent should repeat, or why a fact/file is safe to use.
+
+### Slice A — truth and access substrate
+
+1. Add validity time and observation/transaction time to claim revisions; close
+   superseded validity windows without deleting history.
+2. Add source/evidence permission provenance and filter unauthorized evidence
+   before it becomes a retrieval or context-pack candidate.
+3. Add exact test-to-symbol edges only after one unique file pairing and exact
+   symbol-name resolution.
+4. Add migration, rollback, PostgreSQL-shape, workspace-isolation and concurrent
+   indexing fixtures.
+
+### Slice B — durable learning loop
+
+1. Persist only deterministic founder-oversight findings as open loops, with
+   active, dismissed and resolved state plus source evidence.
+2. Extract a playbook only from a completed run whose required verification
+   passed; preserve source run, files, commands and verification evidence.
+3. Surface open-loop state beside existing findings and show a collapsed
+   `Known playbook` only inside a relevant prepared-task inspector.
+
+### Slice C — freshness and passive capture
+
+1. Add honest `indexed`, `live`, and `combined` retrieval modes. Initial live
+   support is bounded to the local repository and configured GitHub connector;
+   unsupported providers return explicit unsupported errors.
+2. Add `ctxe repo watch` to incrementally index changed repository snapshots and
+   record normalized, redacted repository events without uploading terminal logs.
+3. Expose retrieval mode and freshness in manifests/traces, not as new primary UI
+   navigation.
+
+### Release gates
+
+- No unauthorized evidence enters candidate generation, summaries, graph
+  expansion or context packs.
+- Historical and current claim queries return the correct revision and provenance.
+- Open loops and playbooks are created only from supported deterministic rules.
+- Live mode never falls back silently to indexed data.
+- The watcher is idempotent, bounded and stops cleanly.
+- Existing and new backend/frontend suites, migrations, production build and live
+  desktop/narrow UI checks pass.
+
+### Task ownership
+
+- Contract/coordinator: `.agent-runs/2026-07-15-kimi-roadmap-contract-task.md`
+- Truth/schema review: `.agent-runs/2026-07-15-qwen-truth-access-task.md`
+- Runtime implementation: `.agent-runs/2026-07-15-glm-learning-freshness-task.md`
+- OSS/UX review: `.agent-runs/2026-07-15-xiaomi-roadmap-review-task.md`
+
+### Stop conditions
+
+Do not add connector breadth, a graph database, free-form AI criticism, inferred
+permissions, auto-approved procedures, raw terminal capture, or a new dashboard
+page for internal infrastructure.
+
+### Implemented outcome
+
+- Claim revisions now support validity time and transaction/observation time,
+  including source-backed timeline and as-of reads without deleting history.
+- Permission snapshots and server-bound principals exclude unauthorized evidence
+  before query, graph, digest, source, and context-pack candidacy.
+- Repository indexing adds conservative exact test-symbol links and serializes
+  concurrent indexing per workspace/repository.
+- Deterministic scrutiny findings persist as auditable open loops. Verified agent
+  work can become a reviewable playbook and is reused only after approval and an
+  exact compatible repository snapshot.
+- Query, CLI, and MCP support honest indexed/live/combined modes for bounded local
+  repository and configured GitHub retrieval. Live results become immutable source
+  evidence; failures remain explicit.
+- `ctxe repo watch` records bounded, redacted repository-change evidence and
+  incrementally refreshes the deterministic repository index.
+- The existing Project map exposes only the useful product surfaces: one compact
+  open-loop/review trigger, the existing right rail for action and evidence,
+  collapsed affected-code/playbook details, and honest local-activity freshness.
+
+### Verification
+
+- Backend: Ruff passed; `524 passed`.
+- Frontend: `71 passed`; production Vite build passed.
+- Alembic/runtime migration upgrade and downgrade coverage passed.
+- `git diff --check` passed before final documentation edits.
+- Browser: the real Project map and selected-focus scrutiny rail rendered without
+  new navigation, graph-node clutter, or horizontal layout breakage.
+
 ## 2026-07-14 deterministic project compiler P1 — completed
 
 ### Product outcome
