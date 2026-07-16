@@ -1,5 +1,75 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-16 model-lift harness milestone — completed
+
+### Product outcome
+
+Make Context Engine able to wrap one local coding-agent command, automatically
+preserve what actually happened, enforce a small-model-friendly execution
+contract, and report verified outcomes by model/profile. This is the first
+measurable step toward the narrow claim that an older model can perform closer
+to a newer model on an existing project when it receives better context and
+execution discipline.
+
+### Scope
+
+1. Add a provider-neutral local harness runner that compiles `context_pack.v2`,
+   exposes the brief to the child process, captures bounded/redacted output and
+   deterministic repository state, optionally runs the pack's required checks,
+   and persists the complete run through the existing `AgentRun` /
+   `RunObservation` evidence contract.
+2. Make the existing target-model profiles express execution policy as well as
+   context size: required planning, diff review, verification, retry bounds, and
+   context refresh behavior. Render that policy in the pack and lockfile.
+3. Add deterministic outcome reporting grouped by model and model profile, plus
+   an offline paired-result evaluator for `old_alone`, `old_with_context_engine`,
+   and `new_alone` experiments. Do not claim model lift from fixture quality.
+4. Expose the runner and evaluator through the CLI and document the honest
+   boundary: Context Engine wraps a user-selected worker; it is not a new
+   autonomous coding agent.
+
+### Release gates
+
+- The wrapped command runs only when explicitly supplied by the user.
+- Raw output is bounded before persistence; recognized secret patterns are
+  redacted, and truncated stream content is omitted rather than partially stored.
+- Git/repository evidence is observed directly, not accepted from the child
+  process as a completion claim.
+- Required checks are run only with explicit `--verify`; their real exit codes
+  determine verification state.
+- Small-model packs contain a stricter, machine-readable execution policy than
+  frontier-model packs.
+- Outcome reports separate observed counts from causal or model-parity claims.
+- Focused backend tests, CLI tests, Ruff, and `git diff --check` pass without
+  reverting unrelated user changes.
+
+### Task ownership
+
+- Contract review: Kimi role (`.agent-runs/2026-07-16-kimi-model-lift-harness-contract-task.md`)
+- Integration owner: Codex (`.agent-runs/2026-07-16-codex-model-lift-harness-task.md`)
+- Local runner slice: GLM role (`.agent-runs/2026-07-16-glm-local-harness-task.md`)
+- Model-policy slice: Qwen role (`.agent-runs/2026-07-16-qwen-model-policy-task.md`)
+- Outcome/eval slice: Xiaomi role (`.agent-runs/2026-07-16-xiaomi-harness-outcomes-task.md`)
+
+### Stop conditions
+
+Do not add a general-purpose autonomous agent, silently execute generated shell
+commands, fine-tune a model, claim old/new model parity, store unbounded terminal
+logs, or add provider-specific integrations in this milestone.
+
+### Implemented outcome
+
+- Added a direct-argv local harness with context-pack handoff, bounded evidence,
+  Git snapshots, opt-in verification, cancellation handling, and durable outcomes.
+- Added model-specific execution policy to compiled packs and lockfiles.
+- Added harness-owned outcome reporting and an offline paired experiment evaluator.
+- Rewrote the README around the product, current behavior, limits, and existing logo.
+
+### Verification
+
+- Backend tests, frontend tests/build, Ruff, and `git diff --check` are required
+  before final handoff; final counts are reported in the task response.
+
 ## 2026-07-15 product README refresh — completed
 
 ### Outcome
