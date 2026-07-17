@@ -1,6 +1,6 @@
 # Immediate Context Engine Strengthening Plan
 
-## 2026-07-17 explicit-goal and realistic-project milestone — in progress
+## 2026-07-17 explicit-goal and realistic-project milestone — implementation complete; external validation pending
 
 ### Product outcome
 
@@ -22,6 +22,30 @@ the product to validate against a real external repository rather than demos.
 6. Validate the complete loop on a real external project before treating demo
    behavior as product evidence.
 
+### Implemented outcome
+
+- Current goal is now either an actually active run or an explicit user
+  selection with provenance; historical context packs cannot silently choose it.
+- Needs attention contains blockers, conflicts, stale evidence, and genuine
+  reviews. Ordinary issues remain selectable backlog and suggestions remain
+  visibly non-binding.
+- Workspaces now have explicit project/demo/sandbox identity plus active/archive
+  lifecycle, rename, restore, guarded permanent deletion, impact counts, and a
+  dedicated management surface.
+- The native selector is replaced by a project picker that separates projects
+  from samples and always exposes Add project and Manage actions.
+- First-use setup is repository-first: Context Engine creates a real-project
+  workspace only when local repository indexing succeeds, and rolls back a
+  failed creation instead of leaving an empty workspace.
+- Sessions with unknown repository relevance are called out on Now and remain
+  excluded from health, suggestions, and compiled project truth.
+
+### Remaining validation
+
+- Run the complete capture -> goal -> prepare -> harness -> outcome -> explain
+  loop on a user-supplied external project. The existing Context Engine and demo
+  workspaces are smoke-test evidence only, not external product validation.
+
 ### Release gates
 
 - Old context packs never silently become the current goal.
@@ -29,6 +53,8 @@ the product to validate against a real external repository rather than demos.
 - Open issues remain backlog unless selected or independently blocked/conflicted.
 - Goal mutations are workspace/access scoped and reject ineligible components.
 - Schema upgrades work through both Alembic and runtime migrations.
+- Archiving and deletion are blocked while an agent run is active; permanent
+  deletion additionally requires archive state and exact-name confirmation.
 - Focused and full backend/frontend tests, build, Ruff, and diff checks pass.
 
 ### Ownership
