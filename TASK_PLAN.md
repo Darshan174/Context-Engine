@@ -1,5 +1,44 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-17 product README story — completed
+
+### Product outcome
+
+Explain Context Engine in the language of the person using it: coding agents
+lose project state between sessions, the user pays the context tax, and the
+product turns scattered evidence into a clean handoff for whatever agent or
+model works next.
+
+### Scope
+
+1. Lead with the user-visible change, not the storage architecture.
+2. Make the model-efficiency thesis prominent without claiming proven parity.
+3. Show the real product loop and current shipped surfaces in plain language.
+4. Preserve Setup, Deployment, Contributing, Documentation, and License content.
+
+### Release gates
+
+- Every capability claim maps to implemented UI, API, CLI, or tests.
+- Samples and unverified model-lift claims are not presented as proof.
+- Copy is concise, specific, and avoids generic AI-marketing language.
+- Existing setup and OSS-readiness sections remain unchanged.
+
+### Ownership
+
+- Copy, claim audit, and final verification: Codex
+  (`.agent-runs/2026-07-17-codex-readme-product-story-task.md`).
+
+### Implemented and verified
+
+- The README now leads with the session-to-session context problem and the
+  concrete change in daily agent usage.
+- The older/cheaper-model thesis is prominent, while the absence of real
+  external-project proof remains explicit.
+- The product loop maps each surface to its actual user job and keeps the graph
+  in an explanatory role.
+- Setup, Deployment, Contributing, Documentation, and License remain unchanged.
+- All local README links resolve and `git diff --check` passes.
+
 ## 2026-07-17 explicit-goal and realistic-project milestone — implementation complete; external validation pending
 
 ### Product outcome
