@@ -1,5 +1,47 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-17 explicit-goal and realistic-project milestone — in progress
+
+### Product outcome
+
+Make current work a deliberate user choice, not an inference from whichever old
+context pack happens to contain a focus component. Keep ordinary open issues in
+the backlog, reserve Needs attention for genuinely urgent evidence, and prepare
+the product to validate against a real external repository rather than demos.
+
+### Ordered implementation
+
+1. Persist one explicit active workspace goal with provenance and history;
+   temporarily surface an actually running agent above that selection.
+2. Let users choose, change, or clear current work from the Now page, including
+   a custom objective or an eligible backlog card.
+3. Split urgent attention from ordinary backlog in the digest contract and UI.
+4. Add workspace rename/archive/delete behavior and a dedicated management UI.
+5. Replace name-first setup with repository-first onboarding and visually
+   separate samples from real projects and unassigned AI sessions.
+6. Validate the complete loop on a real external project before treating demo
+   behavior as product evidence.
+
+### Release gates
+
+- Old context packs never silently become the current goal.
+- Only an active run or explicit user selection can populate Current goal.
+- Open issues remain backlog unless selected or independently blocked/conflicted.
+- Goal mutations are workspace/access scoped and reject ineligible components.
+- Schema upgrades work through both Alembic and runtime migrations.
+- Focused and full backend/frontend tests, build, Ruff, and diff checks pass.
+
+### Ownership
+
+- Implementation and integration: Codex
+  (`.agent-runs/2026-07-17-codex-explicit-goals-workspaces-task.md`).
+
+### Stop conditions
+
+Do not auto-select a suggested issue, use demo success as realistic-project
+validation, delete workspace evidence without explicit confirmation, or expose
+sessions with unknown repository relevance as project truth.
+
 ## 2026-07-17 product-loop UX milestone — completed
 
 ### Product outcome
