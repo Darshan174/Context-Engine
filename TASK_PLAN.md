@@ -1,5 +1,71 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-17 workspace navigation and state isolation — implementation complete
+
+### Product outcome
+
+Treat a workspace as a durable, directly enterable project boundary. Opening a
+workspace lands on its own Now page; transient input from another workspace
+cannot appear or be submitted there; saved configuration remains attached to
+the workspace that owns it.
+
+### Observed
+
+- Workspace management cards expose rename/archive controls but no open/select
+  action.
+- Switching workspaces leaves the current route component mounted, so local
+  goal drafts, query results, and compiler mutation state can survive the
+  boundary change.
+- The database did not clone the old goal into stock-radar. The stock-radar goal
+  was written explicitly 46 seconds after workspace creation, consistent with
+  stale frontend input being submitted after the switch.
+- Repository scope, connectors, and explicit goals are already persisted with a
+  workspace ID on the backend.
+
+### Scope
+
+1. Make each active workspace card an accessible open target that selects the
+   workspace and navigates to `/app`.
+2. Make workspace changes enter the selected workspace's Now page and remount
+   workspace-scoped route state.
+3. Reset transient Now/query/compiler output on boundary changes; persist only
+   reusable compiler and retrieval settings under the owning workspace ID.
+4. Prove a new workspace has no current goal while an existing workspace keeps
+   its own goal and configuration.
+
+### Release gates
+
+- Clicking an active project or sample card selects it and opens Now.
+- Rename/archive/delete controls never accidentally open a workspace.
+- A newly created workspace shows no goal or prior query unless the user saves
+  one in that workspace.
+- Returning to an existing workspace restores its backend state and its own
+  compiler/retrieval settings, never another workspace's.
+- Focused/full backend and frontend tests, production build, Ruff, and diff
+  checks pass; the live card-to-Now path is verified.
+
+### Ownership
+
+- Implementation and verification: Codex
+  (`.agent-runs/2026-07-17-codex-workspace-state-isolation-task.md`).
+
+### Implemented outcome
+
+- Active workspace cards and switcher choices now select the workspace and land
+  on its Now page.
+- Workspace changes remount route content, so unsaved goals, questions,
+  histories, results, and compiled output cannot cross project boundaries.
+- Reusable Prepare and retrieval controls are stored under workspace-specific
+  browser keys; new workspaces start from defaults and returning workspaces
+  recover only their own settings.
+- A backend regression proves newly created workspaces have no current goal,
+  while an existing workspace keeps its own persisted goal.
+- Live verification proved an unsaved stock-radar goal draft disappeared across
+  a workspace round trip while the saved workspace goal remained. The accidental
+  stock-radar goal was then cleared through the product UI.
+- All 92 frontend tests, the frontend production build, all 565 backend tests,
+  Ruff, and diff checks pass.
+
 ## 2026-07-17 repository ignore-aware indexing — implementation complete
 
 ### Product outcome
