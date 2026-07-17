@@ -72,7 +72,7 @@ project validation path.
 - Production frontend build, Ruff, and `git diff --check`: passed.
 - Workspace/repository/auth/migration focused backend tests: 28 passed; full
   backend suite: 561 passed with one existing Python 3.12 SQLite warning.
-- Workspace flow frontend tests and desktop/mobile visual pass: passed; all 87
+- Workspace flow frontend tests and desktop/mobile visual pass: passed; all 88
   frontend tests and the production build passed. The
   visual pass caught and fixed mobile popover stacking under the page content.
 - Focused Ruff and `git diff --check`: passed.
