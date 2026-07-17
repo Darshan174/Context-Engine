@@ -84,7 +84,7 @@ line, reference line, qualified names, file hashes, rule version and snapshot.
 Repository indexing is serialized by `(workspace_id, repo_root)`: a PostgreSQL
 transaction advisory lock and a process lock for SQLite/local execution.
 
-## 4. Durable open loops
+## 4. Durable unresolved work (`OpenLoop` internally)
 
 Only supported deterministic founder-oversight findings become `OpenLoop` rows.
 The natural key is the finding key derived from rule, pack/run and sorted trigger
@@ -103,7 +103,7 @@ API:
   `dismiss|resolve|reopen|assign` actions.
 
 The Project bar shows a project-wide open count. Selected-focus loops appear as
-`Needs attention` after Summary and before Affected code. Closed history is
+`Unresolved work` after Summary and before Files to inspect. Closed history is
 collapsed. Loops never become graph-map nodes.
 
 ## 5. Verified playbooks

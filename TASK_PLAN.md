@@ -250,6 +250,44 @@ page for internal infrastructure.
 - Browser: the real Project map and selected-focus scrutiny rail rendered without
   new navigation, graph-node clutter, or horizontal layout breakage.
 
+## 2026-07-15 plain-language inspector and file-scope UX — completed
+
+### Product outcome
+
+The selected-item inspector must explain what Context Engine actually knows in
+plain language. Provider state should replace internal review/confidence labels,
+repository matches must be presented as suggestions rather than confirmed edit
+targets, and empty/unknown states must tell the user what has or has not happened.
+
+### Scope
+
+1. Show issue/PR state such as `Open issue` instead of extraction workflow status.
+2. Remove model confidence percentages from the primary inspector.
+3. Rename affected code to `Files to inspect`, explain that suggestions are not
+   confirmed edit targets, classify each match honestly, and show only three until
+   the user asks for more.
+4. Replace raw rule names, duplicated line ranges, freshness `unknown`, and empty
+   agent-run language with plain product copy.
+5. Keep the machine contract compatible while adding explicit match strength and
+   match basis for the UI and generated agent brief.
+
+### Implemented outcome
+
+- Remote cards now show plain provider state such as `Open issue`; internal
+  extraction confidence and review status no longer occupy the primary inspector.
+- `Files to inspect` labels named files, deterministic matches, weaker word
+  matches, and linked tests honestly while showing only three initially.
+- Canonical filenames such as `README` become explicit file hints, suppressing
+  weaker prose matches for named-file tasks.
+- Product copy uses `Unresolved work` while preserving the internal `OpenLoop`
+  persistence and API contracts.
+
+### Verification
+
+- Backend focused suite: `37 passed`; focused Ruff checks passed.
+- Frontend: `76 passed`; production Vite build passed.
+- `git diff --check` passed.
+
 ## 2026-07-14 deterministic project compiler P1 — completed
 
 ### Product outcome
