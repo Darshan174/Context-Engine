@@ -1,5 +1,47 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-17 repository ignore-aware indexing — implementation complete
+
+### Product outcome
+
+Index the source a user considers part of the project, not generated framework
+output that Git already marks as ignored. Keep the existing file and byte safety
+limits for genuine source candidates.
+
+### Scope
+
+1. Use Git's tracked and non-ignored untracked file set when the repository is a
+   valid Git worktree.
+2. Expand safe fallback exclusions for non-Git projects and incomplete test
+   repositories, including `.next` and common build/cache directories.
+3. Preserve per-file, aggregate-byte, symlink, and file-count limits.
+4. Reproduce the stock-radar `.next` failure in a focused regression test.
+
+### Release gates
+
+- Tracked project files outside known generated directories remain eligible even
+  if a later ignore rule matches them.
+- Untracked ignored files and generated directories never consume the 50 MB cap.
+- Untracked, non-ignored source remains indexable.
+- Non-Git project roots retain deterministic hard-coded safety exclusions.
+- Focused/full tests, Ruff, and `git diff --check` pass.
+
+### Ownership
+
+- Implementation and verification: Codex
+  (`.agent-runs/2026-07-17-codex-repository-ignore-indexing-task.md`).
+
+### Implemented outcome
+
+- Valid Git worktrees are enumerated from tracked files plus non-ignored
+  untracked files, so repository ignore rules define the candidate boundary.
+- Generated directories remain excluded in Git and filesystem-fallback modes as
+  defense in depth.
+- The stock-radar repository now produces 210 candidates totaling 2,429,172
+  bytes, with no `.next` files; the 50 MB cap remains unchanged.
+- Focused indexer tests, the full 564-test backend suite, Ruff, and diff checks
+  pass.
+
 ## 2026-07-17 explicit-goal and realistic-project milestone — implementation complete; external validation pending
 
 ### Product outcome
