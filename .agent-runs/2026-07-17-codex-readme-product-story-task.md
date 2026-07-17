@@ -30,4 +30,5 @@ License unchanged.
   harness, run evidence, graph, connector, API, CLI, and MCP implementations.
 - Setup through License is byte-for-byte unchanged from the branch base.
 - Every local README link resolves.
+- README documentation contract tests: 6 passed.
 - `git diff --check` passed.
