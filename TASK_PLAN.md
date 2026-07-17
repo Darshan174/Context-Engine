@@ -1,5 +1,72 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-17 product-loop UX milestone — completed
+
+### Product outcome
+
+Turn the implemented compiler, run evidence, and graph into one understandable
+user journey: see the project now, prepare task-specific context, inspect verified
+runs, and explain why evidence and relationships mattered. Internal terms such as
+`harness` remain implementation details rather than primary navigation.
+
+### Scope
+
+1. Make `Now`, `Prepare`, `Runs`, and `Explain` the primary product surfaces.
+2. Add a project-state home that surfaces current focus, recent outcome,
+   evidence-backed attention, and a recommended next action without opening the
+   full graph.
+3. Add a task preparation page over the existing `context_pack.v2` API with
+   model-aware pack summary, selected/excluded evidence, preview, and copy.
+4. Expose local-harness-observed outcomes through an authenticated workspace API
+   and render recent verified runs plus an honest model comparison/readiness view.
+5. Make graph relationships visually semantic: containment, blocking,
+   contradiction, supersession, dependency, and provenance must not all look the
+   same.
+
+### Release gates
+
+- Existing evidence, access-scope, and context-pack contracts remain intact.
+- The UI never claims a run was verified without harness-owned passing evidence.
+- Comparison UI distinguishes observed Context Engine runs from a paired causal
+  experiment and does not claim model parity.
+- Empty states explain what evidence is missing and what action creates it.
+- Focused backend/frontend tests, production build, diff checks, and live browser
+  inspection pass without reverting unrelated user changes.
+
+### Ownership
+
+- Contract, implementation, integration, and final review: Codex
+  (`.agent-runs/2026-07-17-codex-product-loop-ui-task.md`).
+
+### Stop conditions
+
+Do not build a new autonomous coding agent, fabricate baseline comparison data,
+execute a model from the browser, expose raw terminal logs, or turn the full
+knowledge graph into the default landing page.
+
+### Implemented outcome
+
+- Added a task-oriented `Now` home, an inspectable `Prepare` compiler surface,
+  local-harness `Runs` evidence with honest comparison boundaries, and a
+  task-scoped `Explain` graph.
+- Exposed source-access-scoped local harness outcomes for the UI without
+  presenting recorded model labels as verified provider identity.
+- Made containment spatial and grouped by parent; blocking, contradiction,
+  supersession, dependency, provenance, and generic associations now use
+  distinct edge treatments.
+- Kept model capability selection honest: the current profile is inferred from
+  the supplied label or falls back conservatively; provider probing remains a
+  future adapter capability.
+
+### Verification
+
+- Backend: `552 passed` (full Pytest suite); focused Ruff checks passed.
+- Frontend: `79 passed` (full Vitest suite); production Vite build passed.
+- `git diff --check` passed.
+- Live browser validation passed for desktop and 390×844 mobile layouts,
+  including real context compilation, weak-readiness messaging, graph
+  inspection, semantic containment, and harness onboarding.
+
 ## 2026-07-16 model-lift harness milestone — completed
 
 ### Product outcome
