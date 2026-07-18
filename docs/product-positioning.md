@@ -2,66 +2,96 @@
 
 ## One-line position
 
-Context Engine is the open-source, self-hosted project-continuity layer for
-people building software with coding agents. It preserves source-backed project
-evidence, keeps the current goal explicit, prepares a focused handoff, and
-records observed run results for the next agent.
+Context Engine compiles verified project history into the minimum task-ready
+context a coding agent needs to continue real work on a long-running codebase.
+
+## What the product is
+
+Context Engine is an open-source context and evidence layer for coding agents.
+It collects project history from repositories, issues, pull requests, imported
+agent sessions, decisions, documents, and verification output, then prepares a
+focused, source-backed brief for one current task.
+
+The product does two connected jobs:
+
+1. **For agents:** compile the relevant facts, files, constraints, blockers,
+   exclusions, repository state, and verification commands into a task-sized
+   context pack.
+2. **For people:** show the evidence and relationships behind the current
+   project state so the user can understand, inspect, and control what the next
+   agent receives.
+
+The context compiler is the core product. The graph is the human-readable
+explanation and navigation surface around that compiler; it is not a separate
+generic knowledge-graph product.
 
 ## First audience
 
 Solo founders and tiny teams using coding agents every day.
 
-Their work is split across Codex, Claude Code, OpenCode, GitHub, chat, and local
-files. One agent proposes a change, another edits the code, a pull request carries
-part of the implementation, and the next session starts without the decisions
-that led there.
+Their work is split across Codex, Claude Code, OpenCode, GitHub, local files,
+and team tools. One agent proposes a change, another edits the code, a pull
+request carries a partial implementation, and the next session starts without
+the decisions or failed checks that led there.
 
 ## Product loop
 
-1. **Sources and connectors** preserve repository state, coding sessions, issues,
-   pull requests, documents, decisions, and verification evidence.
-2. **Now** shows the active or latest coding work, its newest update and stated
-   reason, verified outcomes, and evidence-backed blockers or risks.
-3. **Prepare** compiles a bounded `context_pack.v2` brief with citations and
-   explicit exclusions for one concrete task.
-4. **The user runs the coding agent they choose.** The browser product does not
-   select a provider or dispatch an agent.
-5. **Runs** shows evidence captured by the optional local harness, which executes
-   only the worker command the user supplied.
-6. **Explain** visualizes the evidence and relationships behind the other
-   surfaces.
+1. Connect or import evidence from one project.
+2. Preserve the raw sources and their revisions.
+3. Select the current goal explicitly.
+4. Compile only the context relevant to that goal and target model.
+5. Let the user inspect the selected evidence and exclusions.
+6. Run a user-supplied worker command or copy the brief into another agent.
+7. Record repository changes, checks, blockers, and outcome evidence for the
+   next session.
 
-The daily-use test is whether a user can identify where the project stands, what
-is current, what is blocked or unverified, what changed, and what the next agent
-needs without reconstructing the project from chat history.
+## Daily-use test
 
-## Role of the graph
+A user should be able to open Context Engine and quickly learn:
 
-The knowledge graph is an explanation and inspection surface. It supports Now,
-Prepare, and Runs by showing why evidence is connected. It is not the primary
-handoff artifact, a generic company knowledge graph, or the whole product.
+- what the current goal is;
+- where the project stands;
+- what changed in recent agent runs and code;
+- which blockers, risks, and failed checks are real;
+- why a fact is believed and where it came from;
+- what context the next agent will receive;
+- what remains unresolved after the last run.
+
+## Product wedge
+
+The wedge is:
+
+**Reliable continuity between coding-agent sessions on real codebases.**
+
+The initial proof is not that Context Engine makes a weak model magically
+smarter. It is that better task selection, verified history, less irrelevant
+context, and explicit verification can help cheaper, older, or open models
+complete more useful work than they would with a blank chat or an undirected
+context dump.
 
 ## Not the product
 
-Context Engine is not:
+Context Engine is not positioned as:
 
-- another autonomous coding agent or provider router;
-- enterprise search or an all-in-one RAG platform;
-- a generic memory store or company knowledge graph;
-- an autonomous code reviewer;
-- a claim that a smaller model matches a frontier model.
+- another autonomous coding agent;
+- a generic company knowledge graph;
+- enterprise search;
+- an all-in-one RAG platform;
+- a connector directory;
+- a dashboard that merely lists project activity;
+- proof that smaller models already match frontier models.
 
 ## Current honest boundary
 
-Context Engine can import Codex, Claude Code, and OpenCode session content and
-extract tasks, decisions, blockers, risks, and file references. A session ID is
-stored for identity and provenance, but the project cannot retrieve a remote
-session using only that ID.
+Context Engine currently provides a React app, FastAPI API, `ctxe` CLI, MCP
+server, context compiler, source-backed project views, and a local harness that
+wraps a user-supplied worker command and records bounded execution evidence.
 
-Already-imported local sessions refresh while Now is open. This reads only the
-linked local session; it does not discover unrelated sessions or launch an agent.
+The UI prepares and copies an agent brief; it does not automatically launch
+Codex, Claude Code, OpenCode, or another provider. The local harness runs only
+the explicit command supplied by the user. Model-lift reports describe observed
+runs and do not yet prove general model equivalence.
 
-Local repositories and files work as source evidence. GitHub, Slack, Gmail, and
-Google Drive have configured integration paths. Discord, Zoom, and Wispr Flow are
-coming soon; Notion is not catalogued. Availability must not be presented as a
-hosted, zero-configuration connection flow.
+Local repository and session imports are available. GitHub, Slack, Gmail, and
+Google Drive have configured backend paths, but public onboarding is unfinished.
+Unsupported and coming-soon connectors must remain clearly labelled.
