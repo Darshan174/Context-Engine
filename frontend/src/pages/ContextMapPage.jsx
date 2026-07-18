@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   Loader2,
@@ -36,6 +37,7 @@ function ContextDigestSurface() {
   const indexProject = useIndexProject(activeWorkspaceId);
   const prepareContext = usePrepareContext();
   const [selectedCardId, setSelectedCardId] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [openLoopsOpen, setOpenLoopsOpen] = useState(false);
 
   const digest = digestQuery.data;
@@ -56,15 +58,32 @@ function ContextDigestSurface() {
   const closeInspector = () => {
     const previousCardId = selectedCardId;
     setSelectedCardId(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("card");
+    setSearchParams(next, { replace: true });
     globalThis.requestAnimationFrame?.(() => {
       globalThis.document?.querySelector(`[data-graph-node="${previousCardId}"]`)?.focus();
     });
+  };
+  const openCard = (cardId) => {
+    setOpenLoopsOpen(false);
+    setSelectedCardId(cardId);
+    const next = new URLSearchParams(searchParams);
+    next.set("card", cardId);
+    setSearchParams(next, { replace: true });
   };
 
   useEffect(() => {
     setSelectedCardId(null);
     setOpenLoopsOpen(false);
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    const requestedCardId = searchParams.get("card");
+    if (!requestedCardId || !digest?.cards?.some((card) => card.id === requestedCardId)) return;
+    setOpenLoopsOpen(false);
+    setSelectedCardId(requestedCardId);
+  }, [digest, searchParams]);
 
   if (!workspacesQuery.isLoading && !activeWorkspaceId) {
     return (
@@ -120,8 +139,7 @@ function ContextDigestSurface() {
                     : buildContext.isError ? buildContext.error : null}
                   selectedCardId={selectedCardId}
                   onSelectCard={(card) => {
-                    setOpenLoopsOpen(false);
-                    setSelectedCardId(card.id);
+                    openCard(card.id);
                   }}
                   onClearSelection={() => setSelectedCardId(null)}
                   onIndexProject={(repoPath) => indexProject.mutate({ repo_path: repoPath })}
@@ -163,8 +181,7 @@ function ContextDigestSurface() {
                     onOpenFocus={(componentId) => {
                       const focusCard = digest.cards.find((card) => card.id === `component:${componentId}`);
                       if (!focusCard) return;
-                      setOpenLoopsOpen(false);
-                      setSelectedCardId(focusCard.id);
+                      openCard(focusCard.id);
                     }}
                     onUpdate={(input) => updateOpenLoop.mutateAsync(input)}
                     updating={updateOpenLoop.isPending}

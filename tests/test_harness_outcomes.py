@@ -392,6 +392,7 @@ async def test_run_outcomes_api_returns_workspace_scoped_observed_runs(
     assert payload["schema_version"] == "harness_outcomes.v1"
     assert payload["observed_runs"] == 1
     assert payload["runs"][0]["run_id"] == str(run.id)
+    assert payload["runs"][0]["context_pack_id"] == str(pack.id)
     assert payload["runs"][0]["verified_success"] is True
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -45,6 +46,80 @@ def test_parse_goal_extracts_files_and_constraints():
     assert "connector" in frame.domains
     assert frame.file_hints == ["app/sync/github.py"]
     assert any("connector status" in constraint.lower() for constraint in frame.constraints)
+
+
+async def test_context_pack_comparison_uses_persisted_item_identities(client, db_session):
+    workspace = Workspace(
+        id=uuid4(),
+        name="Pack comparison",
+        slug=f"pack-comparison-{uuid4().hex}",
+    )
+    created_at = datetime(2026, 7, 18, 8, 0, 0)
+    left = ContextPack(
+        id=uuid4(),
+        workspace_id=workspace.id,
+        objective="Fix the workspace loop",
+        target_model="older-model",
+        model_profile="small_coder_model",
+        health_score=61,
+        markdown="# Older pack",
+        manifest=json.dumps({
+            "schema_version": "context_pack.v2",
+            "rendering": {"estimated_tokens": 900},
+            "selected_context": [
+                {"id": "decision:a", "title": "Keep explicit goals", "score": 0.8},
+                {"id": "task:b", "title": "Link observed runs", "score": 0.6},
+                {"title": "Old compiler note", "score": 0.2},
+            ],
+        }),
+        created_at=created_at,
+    )
+    right = ContextPack(
+        id=uuid4(),
+        workspace_id=workspace.id,
+        objective="Fix the workspace loop",
+        target_model="older-model",
+        model_profile="small_coder_model",
+        health_score=83,
+        markdown="# Newer pack",
+        manifest=json.dumps({
+            "schema_version": "context_pack.v2",
+            "rendering": {"estimated_tokens": 760},
+            "selected_context": [
+                {"id": "task:b", "title": "Link observed runs", "score": 0.9},
+                {"id": "verification:c", "title": "Run focused checks", "score": 0.7},
+                {"title": "New compiler note", "score": 0.2},
+            ],
+        }),
+        created_at=created_at + timedelta(minutes=5),
+    )
+    db_session.add_all([workspace, left, right])
+    await db_session.commit()
+
+    response = await client.get(
+        "/api/context/pack-comparisons",
+        params={
+            "workspace_id": str(workspace.id),
+            "left_id": str(right.id),
+            "right_id": str(left.id),
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["schema_version"] == "context_pack_comparison.v1"
+    assert data["left"]["context_pack_id"] == str(left.id)
+    assert data["right"]["context_pack_id"] == str(right.id)
+    assert [item["id"] for item in data["selected_context"]["retained"]] == ["task:b"]
+    assert {item["title"] for item in data["selected_context"]["removed"]} == {
+        "Keep explicit goals",
+        "Old compiler note",
+    }
+    assert {item["title"] for item in data["selected_context"]["added"]} == {
+        "Run focused checks",
+        "New compiler note",
+    }
+    assert data["selected_context"]["changed"][0]["identity"] == "task:b"
 
 
 async def test_compile_pack_persists_manifest_markdown_and_items(db_session, tmp_path):

@@ -71,9 +71,13 @@ def test_alembic_upgrade_bootstraps_current_sqlite_schema(tmp_path):
 
         with engine.connect() as conn:
             version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        workspace_columns = {column["name"] for column in inspector.get_columns("workspaces")}
-        assert {"kind", "status", "archived_at"} <= workspace_columns
+            workspace_columns = {column["name"] for column in inspector.get_columns("workspaces")}
+            assert {"kind", "status", "archived_at"} <= workspace_columns
+            goal_columns = {
+                column["name"] for column in inspector.get_columns("workspace_goals")
+            }
+            assert "contract_json" in goal_columns
 
-        assert version == "0008_context_pack_goals"
+            assert version == "0009_workspace_goal_contract"
     finally:
         engine.dispose()

@@ -1,17 +1,19 @@
 # Local Agent Harness
 
-The harness wraps one local worker command. It gives the worker a task brief and
-records what happened; it does not decide or perform the work itself.
+The harness connects one saved work contract and exact context pack to a local
+coding agent, then records what happened. It does not decide the task or claim a
+successful result without observed verification.
 
 ## What It Does
 
 `ctxe harness run`:
 
-1. compiles and persists `context_pack.v2` for the selected workspace, repo,
-   objective, target model, and token budget;
+1. reopens the selected persisted `context_pack.v2`, or compiles one when an
+   exact pack is not supplied;
 2. creates a linked `AgentRun`;
 3. writes the brief to a permission-restricted temporary file;
-4. runs exactly the argv supplied after `--`, without shell interpolation;
+4. builds direct argv for a selected first-class adapter, or runs exactly the
+   advanced argv supplied after `--`, without shell interpolation;
 5. captures bounded, redacted stdout/stderr and Git state before and after;
 6. records the observed command, changed paths, verification results, and
    terminal outcome as durable source-backed run evidence;
@@ -24,17 +26,33 @@ The worker receives:
 - `CONTEXT_ENGINE_RUN_ID`
 - `CONTEXT_ENGINE_MODEL_PROFILE`
 
-An exact `{context_file}` argv element is replaced with the temporary brief path.
+`{context_file}` inside an argv element is replaced with the temporary brief path.
 
 ## Usage
 
 ```bash
 ctxe harness run "fix the selected task and add focused tests" \
-  --repo . \
+  --repo /path/to/project \
   --workspace-id <workspace-uuid> \
+  --context-pack-id <context-pack-uuid> \
+  --adapter codex \
   --target-model qwen2.5-coder-7b \
-  --budget 4000 \
-  --verify \
+  --verify
+```
+
+Supported first-class adapters are `codex`, `claude_code`, and `opencode`.
+Codex is ready; Claude Code and OpenCode are experimental. Omitting
+`--target-model` uses that agent's configured provider default. Context Engine
+records this distinction and does not present the runtime model as
+provider-attested.
+
+Advanced custom command example:
+
+```bash
+ctxe harness run "fix the selected task and add focused tests" \
+  --repo /path/to/project \
+  --workspace-id <workspace-uuid> \
+  --context-pack-id <context-pack-uuid> \
   -- your-worker --context {context_file}
 ```
 
@@ -94,8 +112,13 @@ Example row:
 
 ## Current Limits
 
-- The user still chooses and configures the worker command.
-- There are no built-in Codex, Claude Code, Hermes, or OpenCode launch adapters.
+- The app generates the exact local command, but the user still starts it in a
+  terminal on the repository machine.
+- Codex is the ready first-class adapter. Claude Code and OpenCode are
+  experimental. Hermes is unsupported.
+- Adapter detection reports the executable and version visible to the Context
+  Engine server process; it does not inspect provider accounts or attest the
+  model used at runtime.
 - Captured output is deliberately bounded; it is not terminal playback.
 - On POSIX systems the runner kills the worker process group on timeout or
   cancellation. Process-tree cleanup is best effort on other platforms.

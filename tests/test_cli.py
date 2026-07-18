@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 from types import SimpleNamespace
 
 import pytest
 
 from app.cli import main as cli_main
+from app.models import ContextPack
 
 
 def test_cli_ingest_single_file_passes_sync_query(monkeypatch, tmp_path):
@@ -264,6 +266,8 @@ def test_cli_harness_run_forwards_explicit_argv(monkeypatch, capsys):
         ".",
         "--workspace-id",
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "--context-pack-id",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         "--target-model",
         "qwen2.5-coder-7b",
         "--",
@@ -278,6 +282,7 @@ def test_cli_harness_run_forwards_explicit_argv(monkeypatch, capsys):
         "{context_file}",
     ]
     assert captured["target_model"] == "qwen2.5-coder-7b"
+    assert captured["context_pack_id"] == "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
     assert "verification: not executed" in capsys.readouterr().out
 
 
@@ -289,7 +294,82 @@ def test_cli_harness_run_requires_explicit_worker_command(capsys):
         "--workspace-id",
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     ]) == 1
-    assert "provide an explicit worker command" in capsys.readouterr().err
+    assert "choose --adapter or provide an explicit worker command" in (
+        capsys.readouterr().err
+    )
+
+
+def test_cli_harness_run_builds_first_class_adapter_command(monkeypatch, capsys):
+    captured = {}
+
+    async def fake_run(args, worker_command):
+        captured.update(vars(args))
+        captured["worker_command"] = worker_command
+        return {
+            "context_pack_id": "pack-1",
+            "run_id": "run-1",
+            "status": "completed",
+            "changed_files": [],
+            "verification_results": [],
+        }
+
+    monkeypatch.setattr(cli_main, "_run_local_harness", fake_run)
+
+    assert cli_main.main([
+        "harness",
+        "run",
+        "fix app.py",
+        "--repo",
+        ".",
+        "--workspace-id",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "--context-pack-id",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "--adapter",
+        "codex",
+        "--target-model",
+        "older-coder",
+        "--verify",
+    ]) == 0
+
+    command = captured["worker_command"]
+    assert command[:2] == ["codex", "exec"]
+    assert ["--model", "older-coder"] == command[-3:-1]
+    assert "{context_file}" in command[-1]
+    assert captured["adapter"] == "codex"
+    assert captured["verify"] is True
+    assert "verification: 0 command(s) executed" in capsys.readouterr().out
+
+
+def test_reused_harness_pack_requires_same_workspace_objective_and_v2_manifest():
+    workspace_id = uuid4()
+    pack = ContextPack(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        objective="Fix the workspace loop",
+        markdown="# Exact brief",
+        manifest=json.dumps({"schema_version": "context_pack.v2"}),
+    )
+
+    manifest = cli_main._validated_reused_harness_manifest(
+        pack,
+        workspace_id=workspace_id,
+        objective="Fix   the workspace loop",
+    )
+
+    assert manifest["schema_version"] == "context_pack.v2"
+    with pytest.raises(ValueError, match="same workspace|not found in workspace"):
+        cli_main._validated_reused_harness_manifest(
+            pack,
+            workspace_id=uuid4(),
+            objective=pack.objective,
+        )
+    with pytest.raises(ValueError, match="exactly match"):
+        cli_main._validated_reused_harness_manifest(
+            pack,
+            workspace_id=workspace_id,
+            objective="Different goal",
+        )
 
 
 def test_cli_worker_sync_runs_pending_jobs(monkeypatch, capsys):

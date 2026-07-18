@@ -191,7 +191,8 @@ describe("DigestBoard", () => {
       },
     });
 
-    expect(screen.getByTitle("Preserve source-backed project handoffs.")).toHaveTextContent("Preserve source-backed project handoffs.");
+    expect(screen.getByTitle("Preserve source-backed project handoffs.")).toHaveTextContent("Latest pack · Preserve source-backed project handoffs.");
+    expect(screen.queryByText(/Now ·/)).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /objective/i })).not.toBeInTheDocument();
   });
 

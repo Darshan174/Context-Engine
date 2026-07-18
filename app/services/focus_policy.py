@@ -3,9 +3,15 @@ from __future__ import annotations
 
 FOCUS_FACT_TYPES = frozenset({"task", "issue", "requirement", "decision", "blocker"})
 INELIGIBLE_FOCUS_STATUSES = frozenset({"rejected", "resolved", "superseded"})
+INELIGIBLE_PROVIDER_STATES = frozenset({"closed", "merged"})
 
 
-def focus_eligibility(fact_type: str | None, status: str | None) -> tuple[bool, str | None]:
+def focus_eligibility(
+    fact_type: str | None,
+    status: str | None,
+    *,
+    provider_state: str | None = None,
+) -> tuple[bool, str | None]:
     normalized_type = (fact_type or "fact").lower()
     normalized_status = (status or "active").lower()
     if normalized_type not in FOCUS_FACT_TYPES:
@@ -18,4 +24,10 @@ def focus_eligibility(fact_type: str | None, status: str | None) -> tuple[bool, 
         return False, "This evidence type cannot be used as an agent task."
     if normalized_status in INELIGIBLE_FOCUS_STATUSES:
         return False, f"This {normalized_type} is {normalized_status} and is no longer actionable."
+    normalized_provider_state = (provider_state or "").lower()
+    if normalized_provider_state in INELIGIBLE_PROVIDER_STATES:
+        return (
+            False,
+            f"This {normalized_type} is {normalized_provider_state} at its provider and is no longer actionable.",
+        )
     return True, None

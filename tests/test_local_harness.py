@@ -241,6 +241,31 @@ async def test_runner_never_interprets_a_shell_command_string(db_session, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_runner_replaces_context_placeholder_inside_adapter_prompt(
+    db_session,
+    tmp_path,
+):
+    root = _repository(tmp_path)
+    pack, run = await _pack_and_run(db_session)
+    child_code = (
+        "import sys; from pathlib import Path; "
+        "value = sys.argv[1]; assert value.startswith('pack='); "
+        "assert Path(value.removeprefix('pack=')).read_text().startswith('# Context pack')"
+    )
+
+    result = await LocalHarnessRunner(db_session).run(
+        context_pack_id=pack.id,
+        run_id=run.id,
+        repo_path=root,
+        command=[sys.executable, "-c", child_code, "pack={context_file}"],
+    )
+
+    assert result.status == "completed"
+    assert result.command.argv[-1].startswith("pack=")
+    assert "{context_file}" not in result.command.argv[-1]
+
+
+@pytest.mark.asyncio
 async def test_runner_rejects_a_run_linked_to_another_pack(db_session, tmp_path):
     root = _repository(tmp_path)
     pack, _ = await _pack_and_run(db_session)

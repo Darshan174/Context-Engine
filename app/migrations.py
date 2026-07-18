@@ -35,6 +35,7 @@ async def run_migrations(conn: AsyncConnection) -> None:
     await _migrate_postgres_text_search_schema(conn)
     await _migrate_founder_oversight_schema(conn)
     await _migrate_workspace_goals_schema(conn)
+    await _migrate_workspace_goal_contract_schema(conn)
     await _migrate_context_pack_goal_schema(conn)
     await _migrate_deterministic_project_compiler_schema(conn)
     await _migrate_truth_access_schema(conn)
@@ -125,6 +126,15 @@ async def _migrate_context_pack_goal_schema(conn: AsyncConnection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_context_packs_workspace_goal "
         "ON context_packs (workspace_goal_id)"
     ))
+
+
+async def _migrate_workspace_goal_contract_schema(conn: AsyncConnection) -> None:
+    """Turn legacy goal labels into durable structured work contracts."""
+    columns = await _get_table_columns(conn, "workspace_goals")
+    if columns and "contract_json" not in columns:
+        await conn.execute(text(
+            "ALTER TABLE workspace_goals ADD COLUMN contract_json TEXT NOT NULL DEFAULT '{}'"
+        ))
 
 
 async def _migrate_learning_loop_schema(conn: AsyncConnection) -> None:

@@ -26,6 +26,7 @@ const SourceManager = lazy(() => import("./pages/SourceManager"));
 const Landing      = lazy(() => import("./pages/Landing"));
 const Connectors   = lazy(() => import("./pages/Connectors"));
 const ConnectorRunsPage = lazy(() => import("./pages/ConnectorRunsPage"));
+const WorkItemsPage = lazy(() => import("./pages/WorkItemsPage"));
 const Changes      = lazy(() => import("./pages/Changes"));
 const WorkspacesPage = lazy(() => import("./pages/WorkspacesPage"));
 
@@ -145,6 +146,7 @@ function AdminShell() {
             <Route index                                  element={<NowPage />} />
             <Route path="prepare"                         element={<PreparePage />} />
             <Route path="runs"                            element={<RunsPage />} />
+            <Route path="work"                            element={<WorkItemsPage />} />
             <Route path="explain"                         element={<ContextMapPage />} />
             <Route path="dashboard"                       element={<Navigate to="/app" replace />} />
             <Route path="graph"                           element={<Navigate to="/app/explain" replace />} />

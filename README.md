@@ -66,7 +66,8 @@ being filled in with a guess.
 | Project view | Shows system structure, decisions, delivery, risks, next work, and supporting evidence. |
 | Context compiler | Produces `context_pack.v2` as readable Markdown plus an auditable manifest. |
 | Agent scrutiny | Flags missing or failed checks, unresolved blockers, stale task context, and completion claims that conflict with recorded evidence. |
-| Local harness | Wraps one user-supplied worker command and records bounded output, Git changes, checks, and outcome evidence. |
+| Work sessions | Saves one objective, explicit completion checks, agent choice, and exact context pack as a durable contract. |
+| Local harness | Launches a detected Codex, Claude Code, or OpenCode CLI—or an advanced custom command—and records bounded output, Git changes, checks, and outcome evidence. |
 | Learning loop | Keeps unresolved work visible and extracts reviewable playbooks from verified runs. |
 | Query | Returns source-backed answers with a `query.v1` facts-used trace. |
 | Interfaces | React app, FastAPI API, `ctxe` CLI, and MCP server. |
@@ -74,17 +75,24 @@ being filled in with a guess.
 
 ## Local agent harness
 
-The harness does not choose an agent or provider. You supply the command. Context
-Engine prepares the brief, exposes it to the worker, observes the repository, and
-stores factual run evidence.
+Starting work in the app creates one durable chain: work contract → exact context
+pack → configured agent → observed result. The Runs screen generates the command
+for a detected local agent; the CLI then exposes the saved pack, observes the
+repository, runs authorized checks, and stores factual run evidence.
 
 ```bash
 ctxe harness run "fix the selected task" \
+  --repo /path/to/project \
   --workspace-id <workspace-uuid> \
+  --context-pack-id <context-pack-uuid> \
+  --adapter codex \
   --target-model qwen2.5-coder-7b \
-  --verify \
-  -- your-worker --context {context_file}
+  --verify
 ```
+
+Codex is the ready first-class adapter. Claude Code and OpenCode are detected and
+available as experimental adapters. Advanced users can still pass a custom direct
+argv command after `--`; the harness never invokes it through a shell.
 
 `--verify` is explicit permission to run the required checks in the compiled
 brief. Without it, the run is recorded but may remain unverified.
@@ -115,10 +123,12 @@ Demo data never marks a connector as authenticated or connected.
 
 ## Current limits
 
-- The product UI prepares and copies an agent brief; it does not send it
-  automatically.
-- The CLI harness runs only the explicit local command supplied by the user.
-- There are no built-in Codex, Claude Code, Hermes, or OpenCode launch adapters.
+- The product UI saves the work contract and exact pack, then generates a command;
+  it does not yet start the local process from the browser.
+- Codex has a first-class adapter. Claude Code and OpenCode adapters are
+  experimental. Hermes is not supported.
+- Runtime model identity is user-configured or a provider default; it is recorded
+  honestly but is not independently attested by the provider yet.
 - Scrutiny uses deterministic evidence rules. It is not an autonomous code review.
 - Live retrieval is limited to the local repository and configured manual-token
   GitHub access.
@@ -134,6 +144,8 @@ Main API routes:
 
 | Route | Purpose |
 |---|---|
+| `POST /api/workspaces/{id}/work-session` | Save a work contract and compile its exact context pack atomically. |
+| `GET /api/workspaces/{id}/agent-adapters` | Detect supported local agent CLIs and versions. |
 | `POST /api/context/prepare` | Compile and persist a task brief. |
 | `POST /api/query` | Query project context with a source trace. |
 | `POST /api/repo/index` | Index repository files, symbols, and exact structural links. |
