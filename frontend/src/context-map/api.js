@@ -25,11 +25,54 @@ export function useSetCurrentGoal(workspaceId) {
   });
 }
 
+export function useAgentAdapters(workspaceId) {
+  return useQuery({
+    queryKey: ["agent-adapters", workspaceId],
+    queryFn: () => api.get(`/workspaces/${workspaceId}/agent-adapters`),
+    enabled: Boolean(workspaceId),
+    retry: 1,
+  });
+}
+
+export function useStartWorkSession(workspaceId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (contract) => {
+      const result = await api.post(`/workspaces/${workspaceId}/work-session`, contract);
+      validateContextPackResponse(result?.pack);
+      return result;
+    },
+    onSuccess: (result) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["context-digest", workspaceId] }),
+      queryClient.invalidateQueries({ queryKey: ["context-packs", workspaceId] }),
+      queryClient.setQueryData(
+        ["context-pack", workspaceId, result?.pack?.context_pack_id],
+        result?.pack,
+      ),
+    ]),
+  });
+}
+
 export function useClearCurrentGoal(workspaceId) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => api.delete(`/workspaces/${workspaceId}/current-goal`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["context-digest", workspaceId] }),
+  });
+}
+
+export function useCompleteCurrentGoal(workspaceId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId }) => api.post(
+      `/workspaces/${workspaceId}/current-goal/complete`,
+      { run_id: runId },
+    ),
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["context-digest", workspaceId] }),
+      queryClient.invalidateQueries({ queryKey: ["context-run-outcomes", workspaceId] }),
+      queryClient.invalidateQueries({ queryKey: ["context-packs", workspaceId] }),
+    ]),
   });
 }
 
@@ -56,12 +99,13 @@ function runOutcomesPath(workspaceId) {
   return `/context/run-outcomes?${params}`;
 }
 
-export function useRunOutcomes(workspaceId) {
+export function useRunOutcomes(workspaceId, { refetchInterval = false } = {}) {
   return useQuery({
     queryKey: ["context-run-outcomes", workspaceId],
     queryFn: () => api.get(runOutcomesPath(workspaceId)),
     enabled: Boolean(workspaceId),
     retry: 1,
+    refetchInterval,
   });
 }
 
@@ -196,6 +240,23 @@ export function useContextPack(workspaceId, contextPackId) {
     queryKey: ["context-pack", workspaceId, contextPackId],
     queryFn: () => api.get(`/context/packs/${encodeURIComponent(contextPackId)}?workspace_id=${encodeURIComponent(workspaceId)}`),
     enabled: Boolean(workspaceId && contextPackId),
+    retry: 1,
+  });
+}
+
+export function useContextPackComparison(workspaceId, packIds) {
+  const [leftId, rightId] = packIds || [];
+  return useQuery({
+    queryKey: ["context-pack-comparison", workspaceId, leftId, rightId],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        workspace_id: workspaceId,
+        left_id: leftId,
+        right_id: rightId,
+      });
+      return api.get(`/context/pack-comparisons?${params}`);
+    },
+    enabled: Boolean(workspaceId && leftId && rightId && leftId !== rightId),
     retry: 1,
   });
 }

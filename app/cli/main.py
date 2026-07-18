@@ -111,24 +111,38 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     harness_parser = subparsers.add_parser(
         "harness",
-        help="Wrap an explicit local coding-agent command and measure observed outcomes.",
+        help="Run a configured local coding agent and measure observed outcomes.",
     )
     harness_subparsers = harness_parser.add_subparsers(
         dest="harness_command", required=True
     )
     harness_run_parser = harness_subparsers.add_parser(
         "run",
-        help="Compile context, run one explicit worker command, and preserve evidence.",
+        help="Open an exact context pack, run one agent adapter, and preserve evidence.",
         epilog=(
-            "Worker syntax: append `-- executable arg ...`. An exact "
-            "`{context_file}` argument is replaced with the generated brief path."
+            "Choose --adapter for a first-class agent, or append "
+            "`-- executable arg ...` for an advanced custom command. "
+            "`{context_file}` is replaced with the generated brief path."
         ),
     )
     harness_run_parser.add_argument("objective", help="Trusted coding task objective")
     harness_run_parser.add_argument("--repo", default=".", help="Git repository path")
     harness_run_parser.add_argument("--workspace-id", required=True)
     harness_run_parser.add_argument(
-        "--target-model", default="general-coder", help="Worker model name or profile"
+        "--context-pack-id",
+        default=None,
+        help="Reuse one persisted workspace context pack instead of compiling a new pack",
+    )
+    harness_run_parser.add_argument(
+        "--target-model",
+        default=None,
+        help="Recorded worker model; blank uses the adapter's configured provider default",
+    )
+    harness_run_parser.add_argument(
+        "--adapter",
+        choices=("codex", "claude_code", "opencode"),
+        default=None,
+        help="Use a first-class direct-argv agent adapter instead of a custom command",
     )
     harness_run_parser.add_argument("--budget", type=int, default=None)
     harness_run_parser.add_argument(
@@ -581,8 +595,22 @@ def run_harness(args: argparse.Namespace) -> int:
     worker_command = list(args.worker_command or [])
     if worker_command and worker_command[0] == "--":
         worker_command = worker_command[1:]
-    if not worker_command:
-        print("Error: provide an explicit worker command after `--`", file=sys.stderr)
+    if args.adapter and worker_command:
+        print("Error: use either --adapter or a custom command after `--`, not both", file=sys.stderr)
+        return 1
+    if args.adapter:
+        from app.services.agent_adapters import build_agent_command
+
+        worker_command = build_agent_command(
+            args.adapter,
+            repo_path=args.repo,
+            target_model=args.target_model,
+        )
+    elif not worker_command:
+        print(
+            "Error: choose --adapter or provide an explicit worker command after `--`",
+            file=sys.stderr,
+        )
         return 1
     try:
         data = asyncio.run(_run_local_harness(args, worker_command))
@@ -616,7 +644,7 @@ async def _run_local_harness(
     from sqlalchemy import select
 
     from app.database import AsyncSessionLocal
-    from app.models import AgentRun, Workspace, WorkspaceGoal
+    from app.models import AgentRun, ContextPack, Workspace, WorkspaceGoal
     from app.services.context_compiler import ContextCompiler
     from app.services.local_harness import LocalHarnessRunner
     from app.time import utc_now
@@ -629,35 +657,50 @@ async def _run_local_harness(
     async with AsyncSessionLocal() as session:
         if await session.get(Workspace, workspace_id) is None:
             raise ValueError(f"Workspace not found: {workspace_id}")
-        selected_goal = await session.scalar(
-            select(WorkspaceGoal)
-            .where(
-                WorkspaceGoal.workspace_id == workspace_id,
-                WorkspaceGoal.status == "active",
+        requested_pack_id = getattr(args, "context_pack_id", None)
+        if requested_pack_id:
+            pack_id = UUID(str(requested_pack_id))
+            pack = await session.get(ContextPack, pack_id)
+            if pack is None:
+                raise ValueError(
+                    f"ContextPack not found in workspace {workspace_id}: {pack_id}"
+                )
+            pack_manifest = _validated_reused_harness_manifest(
+                pack,
+                workspace_id=workspace_id,
+                objective=str(args.objective),
             )
-            .order_by(WorkspaceGoal.selected_at.desc(), WorkspaceGoal.id.desc())
-            .limit(1)
-        )
-        objective_matches_goal = bool(
-            selected_goal
-            and " ".join(selected_goal.title.split())
-            == " ".join(str(args.objective).split())
-        )
-        pack_result = await ContextCompiler(session).compile_context_pack(
-            args.objective,
-            workspace_id=workspace_id,
-            repo_path=args.repo,
-            target_model=args.target_model,
-            token_budget=args.budget,
-            workspace_goal_id=(selected_goal.id if objective_matches_goal else None),
-            focus_component_id=(
-                selected_goal.component_id if objective_matches_goal else None
-            ),
-            persist=True,
-        )
-        if not pack_result.context_pack_id:
-            raise RuntimeError("context compiler returned no durable context_pack_id")
-        pack_id = UUID(str(pack_result.context_pack_id))
+        else:
+            selected_goal = await session.scalar(
+                select(WorkspaceGoal)
+                .where(
+                    WorkspaceGoal.workspace_id == workspace_id,
+                    WorkspaceGoal.status == "active",
+                )
+                .order_by(WorkspaceGoal.selected_at.desc(), WorkspaceGoal.id.desc())
+                .limit(1)
+            )
+            objective_matches_goal = bool(
+                selected_goal
+                and " ".join(selected_goal.title.split())
+                == " ".join(str(args.objective).split())
+            )
+            pack_result = await ContextCompiler(session).compile_context_pack(
+                args.objective,
+                workspace_id=workspace_id,
+                repo_path=args.repo,
+                target_model=args.target_model,
+                token_budget=args.budget,
+                workspace_goal_id=(selected_goal.id if objective_matches_goal else None),
+                focus_component_id=(
+                    selected_goal.component_id if objective_matches_goal else None
+                ),
+                persist=True,
+            )
+            if not pack_result.context_pack_id:
+                raise RuntimeError("context compiler returned no durable context_pack_id")
+            pack_id = UUID(str(pack_result.context_pack_id))
+            pack_manifest = pack_result.manifest
         existing = await session.scalar(
             select(AgentRun).where(
                 AgentRun.workspace_id == workspace_id,
@@ -669,13 +712,13 @@ async def _run_local_harness(
                 f"run_key {run_key!r} already exists in this workspace; "
                 "use a new key for a new execution"
             )
-        repo_state = pack_result.manifest.get("repo_state") or {}
+        repo_state = pack_manifest.get("repo_state") or {}
         run = AgentRun(
             workspace_id=workspace_id,
             context_pack_id=pack_id,
             run_key=run_key,
-            tool=str(args.tool or "local-harness"),
-            model=str(args.target_model),
+            tool=str(args.adapter or args.tool or "local-harness"),
+            model=str(args.target_model or "provider-default-unverified"),
             objective=str(args.objective),
             branch=repo_state.get("branch"),
             base_commit=repo_state.get("head_commit") or repo_state.get("base_commit"),
@@ -704,11 +747,41 @@ async def _run_local_harness(
             raise
         return {
             **result.to_dict(),
-            "target_model": args.target_model,
-            "model_profile": pack_result.manifest.get("target_model", {}).get("profile"),
-            "execution_policy": pack_result.manifest.get("execution_policy"),
+            "target_model": args.target_model or "provider-default-unverified",
+            "model_identity_source": (
+                "configured_by_user" if args.target_model else "provider_default_unverified"
+            ),
+            "provider_attested": False,
+            "adapter_id": args.adapter,
+            "model_profile": pack_manifest.get("target_model", {}).get("profile"),
+            "execution_policy": pack_manifest.get("execution_policy"),
             "verification_authorized": bool(args.verify),
         }
+
+
+def _validated_reused_harness_manifest(
+    pack,
+    *,
+    workspace_id,
+    objective: str,
+) -> dict:
+    if pack.workspace_id != workspace_id:
+        raise ValueError(
+            f"ContextPack not found in workspace {workspace_id}: {pack.id}"
+        )
+    if " ".join(pack.objective.split()) != " ".join(objective.split()):
+        raise ValueError(
+            "The supplied objective must exactly match the persisted context pack"
+        )
+    try:
+        manifest = json.loads(pack.manifest or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("The persisted context pack manifest is invalid") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("The persisted context pack manifest is invalid")
+    if manifest.get("schema_version") != "context_pack.v2":
+        raise ValueError("The persisted context pack is not context_pack.v2")
+    return manifest
 
 
 async def _harness_outcome_report(args: argparse.Namespace) -> dict:

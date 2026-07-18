@@ -39,6 +39,10 @@ vi.mock("./pages/RunsPage", () => ({
   default: () => <h1>Runs page</h1>,
 }));
 
+vi.mock("./pages/WorkItemsPage", () => ({
+  default: () => <h1>Project work page</h1>,
+}));
+
 beforeEach(() => {
   appMocks.workspaces = [];
   const values = new Map();
@@ -148,6 +152,24 @@ it("redirects legacy dashboard and graph routes to their replacement surfaces", 
     </QueryClientProvider>,
   );
   expect(await screen.findByRole("heading", { name: "Explain project" })).toBeInTheDocument();
+});
+
+it("keeps the complete work queue reachable without adding sidebar clutter", async () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <WorkspaceProvider>
+          <MemoryRouter initialEntries={["/app/work?view=attention"]}>
+            <App />
+          </MemoryRouter>
+        </WorkspaceProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "Project work page" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Project work" })).not.toBeInTheDocument();
 });
 
 it("collapses the desktop sidebar with an accessible persisted control", async () => {

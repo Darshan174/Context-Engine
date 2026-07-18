@@ -327,7 +327,7 @@ function ProjectBar({ workspaceName, objectiveText, oversight, generatedAt, node
             <span className="text-[#929289]"> · {latestOutcome?.summary || "No observed outcome yet"}</span>
           </button>
         ) : objectiveText ? (
-          <p className="mt-0.5 max-w-xl truncate text-[9px] font-semibold text-[#68685f] dark:text-[#b8b8af]" title={objectiveText}><span className="text-[#929289]">Now ·</span> {objectiveText}</p>
+          <p className="mt-0.5 max-w-xl truncate text-[9px] font-semibold text-[#68685f] dark:text-[#b8b8af]" title={objectiveText}><span className="text-[#929289]">Latest pack ·</span> {objectiveText}</p>
         ) : null}
       </div>
 

@@ -6,7 +6,7 @@ import math
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -36,6 +36,7 @@ from app.services.playbooks import PlaybookService
 from app.services.project_scope import workspace_references, workspace_relevance
 from app.services.repo_indexer import RANKING_VERSION, RepoFrame, RepoIndexer
 from app.services.workspace_scope import metadata_dict
+from app.services.workspace_goals import build_work_contract, workspace_goal_contract
 from app.taxonomy import canonical_trust_zone
 from app.time import utc_now
 
@@ -288,6 +289,7 @@ class ContextCompiler:
         objective_origin: str | None = None,
         objective_source_document_id: str | UUID | None = None,
         objective_evidence_span_id: str | UUID | None = None,
+        work_contract: Mapping[str, Any] | None = None,
         access_scope: AccessScope | None = None,
     ) -> CompiledContextPack:
         access_scope = access_scope or AccessScope.local()
@@ -313,6 +315,12 @@ class ContextCompiler:
             raise InvalidGoalError("token_budget is too small for mandatory context-pack sections")
         workspace_uuid = _uuid_or_none(workspace_id)
         workspace_goal_uuid = _uuid_or_none(workspace_goal_id)
+        effective_work_contract = _normalize_work_contract(
+            work_contract,
+            objective=goal_frame.objective,
+            target_model=target_model,
+            token_budget=effective_budget,
+        )
         if workspace_goal_uuid is not None:
             if self.session is None or workspace_uuid is None:
                 raise FocusValidationError(
@@ -331,6 +339,12 @@ class ContextCompiler:
                     "workspace_goal_objective_mismatch",
                     "The compiled objective no longer matches the selected current goal.",
                 )
+            effective_work_contract = _normalize_work_contract(
+                workspace_goal_contract(workspace_goal),
+                objective=goal_frame.objective,
+                target_model=target_model,
+                token_budget=effective_budget,
+            )
         if repo_path is not None and str(repo_path).strip():
             root = Path(repo_path).expanduser().resolve()
             if not root.exists() or not root.is_dir():
@@ -361,6 +375,7 @@ class ContextCompiler:
             profile,
             affected_code=affected_code,
         )
+        task_frame = _task_frame_with_work_contract(task_frame, effective_work_contract)
         candidates = await self._collect_candidates(
             goal_frame,
             repo_frame,
@@ -435,6 +450,7 @@ class ContextCompiler:
                 persistence_reason=None if persist else "file_output_only",
                 focus=focus,
                 known_playbook=known_playbook,
+                work_contract=effective_work_contract,
             )
             markdown = render_context_pack_markdown(manifest, profile)
             rendered_tokens = estimate_tokens(markdown)
@@ -479,6 +495,7 @@ class ContextCompiler:
             token_budget=effective_budget,
             focus=focus,
             known_playbook=known_playbook,
+            work_contract=effective_work_contract,
         )
         manifest["input_fingerprint"] = manifest["lockfile"]["replay_key"]
         persistence_key = manifest["lockfile"]["replay_key"]
@@ -647,6 +664,11 @@ class ContextCompiler:
         focus_eligible, focus_ineligible_reason = focus_eligibility(
             component.fact_type,
             component.status,
+            provider_state=(
+                str(metadata_dict(component.source_document).get("state") or "")
+                if component.source_document is not None
+                else None
+            ),
         )
         if not focus_eligible:
             raise FocusValidationError(
@@ -1170,6 +1192,7 @@ class ContextCompiler:
         persistence_reason: str | None,
         focus: dict[str, Any],
         known_playbook: dict[str, Any] | None,
+        work_contract: dict[str, Any],
     ) -> dict[str, Any]:
         manifest = {
             "schema_version": SCHEMA_VERSION,
@@ -1187,6 +1210,7 @@ class ContextCompiler:
             "created_at": created_at,
             "workspace_id": str(workspace_id) if workspace_id else None,
             "workspace_goal_id": str(workspace_goal_id) if workspace_goal_id else None,
+            "work_contract": work_contract,
             "target_model": {
                 "name": target_model or "default",
                 "profile": profile.name,
@@ -1374,6 +1398,57 @@ def parse_goal(goal: str, *, objective_kind: str = "observed") -> GoalFrame:
         constraints=constraints,
         objective_kind=objective_kind,
     )
+
+
+def _normalize_work_contract(
+    raw: Mapping[str, Any] | None,
+    *,
+    objective: str,
+    target_model: str | None,
+    token_budget: int,
+) -> dict[str, Any]:
+    contract = dict(raw or {})
+    contract_objective = " ".join(str(contract.get("objective") or objective).split())
+    if contract_objective != objective:
+        raise InvalidGoalError("work contract objective must match the compiled objective")
+    raw_criteria = contract.get("definition_of_done")
+    criteria = raw_criteria if isinstance(raw_criteria, list) else []
+    raw_agent = contract.get("agent")
+    agent = raw_agent if isinstance(raw_agent, dict) else {}
+    raw_context = contract.get("context")
+    context = raw_context if isinstance(raw_context, dict) else {}
+    return build_work_contract(
+        objective=objective,
+        definition_of_done=[str(item) for item in criteria],
+        adapter_id=str(agent.get("adapter_id") or "") or None,
+        target_model=target_model or str(agent.get("target_model") or "") or None,
+        token_budget=token_budget or context.get("token_budget"),
+    )
+
+
+def _task_frame_with_work_contract(
+    task_frame: dict[str, Any],
+    work_contract: dict[str, Any],
+) -> dict[str, Any]:
+    criteria = [
+        {
+            "id": f"USER_AC{index}",
+            "text": item,
+            "evidence_required": "agent_result_and_verification",
+            "source": "user_definition_of_done",
+        }
+        for index, item in enumerate(
+            work_contract.get("definition_of_done") or [],
+            start=1,
+        )
+    ]
+    return {
+        **task_frame,
+        "acceptance_criteria": [
+            *criteria,
+            *(task_frame.get("acceptance_criteria") or []),
+        ],
+    }
 
 
 def infer_task_frame(
@@ -1576,19 +1651,48 @@ def render_context_pack_markdown(
         "# Objective",
         "",
         manifest["objective"],
-        "",
-        "## Current Repo State",
-        "",
-        f"- Repo: `{repo_state.get('repo_path')}`",
-        f"- Branch: `{repo_state.get('branch')}`",
-        f"- Base commit: `{repo_state.get('base_commit')}`",
-        f"- Head commit: `{repo_state.get('head_commit')}`",
-        f"- Dirty worktree: `{str(bool(repo_state.get('dirty'))).lower()}`",
-        f"- Target model profile: `{target_model.get('profile')}`",
-        "",
-        "## Files To Inspect" if affected_files else "## Relevant Repository Files",
-        "",
     ]
+    definition_of_done = (
+        (manifest.get("work_contract") or {}).get("definition_of_done") or []
+    )
+    if definition_of_done:
+        sections.extend(["", "## Definition Of Done", ""])
+        sections.extend(f"- {item}" for item in definition_of_done)
+    agent_contract = (manifest.get("work_contract") or {}).get("agent") or {}
+    if agent_contract.get("adapter_id") or agent_contract.get("target_model"):
+        sections.extend(
+            [
+                "",
+                "## Agent Target",
+                "",
+                f"- Adapter: `{agent_contract.get('adapter_id') or 'not specified'}`",
+                "- Requested model: "
+                f"`{agent_contract.get('target_model') or 'provider default (unverified)'}`",
+                "- Model identity source: "
+                f"`{agent_contract.get('model_identity_source') or 'unverified'}`",
+                "- Runtime model provider-attested: `false`",
+            ]
+        )
+    sections.extend(
+        [
+            "",
+            "## Current Repo State",
+            "",
+            f"- Repo: `{repo_state.get('repo_path')}`",
+            f"- Branch: `{repo_state.get('branch')}`",
+            f"- Base commit: `{repo_state.get('base_commit')}`",
+            f"- Head commit: `{repo_state.get('head_commit')}`",
+            f"- Dirty worktree: `{str(bool(repo_state.get('dirty'))).lower()}`",
+            f"- Target model profile: `{target_model.get('profile')}`",
+            "",
+            (
+                "## Files To Inspect"
+                if affected_files
+                else "## Relevant Repository Files"
+            ),
+            "",
+        ]
+    )
     if affected_files:
         sections.extend([
             "These are task-based suggestions, not confirmed edit targets. Verify them before changing code.",
@@ -2342,6 +2446,7 @@ def _build_lockfile(
     token_budget: int,
     focus: dict[str, Any],
     known_playbook: dict[str, Any] | None,
+    work_contract: dict[str, Any],
 ) -> dict[str, Any]:
     repo_snapshot = {
         "repo_path": repo_state.get("repo_path"),
@@ -2436,6 +2541,7 @@ def _build_lockfile(
         "ranking_version": RANKING_VERSION,
         "objective": goal_frame.objective,
         "objective_kind": goal_frame.objective_kind,
+        "work_contract": work_contract,
         "focus": focus,
         "workspace_id": str(workspace_id) if workspace_id else None,
         "target_model": target_model or "default",

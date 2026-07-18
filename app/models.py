@@ -867,6 +867,9 @@ class WorkspaceGoal(Base):
         String(32), nullable=False, default="user_selected"
     )
     source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    contract_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", server_default=text("'{}'")
+    )
     selected_by: Mapped[str] = mapped_column(
         String(255), nullable=False, default="local_user"
     )

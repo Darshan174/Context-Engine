@@ -87,6 +87,8 @@ class _VerificationEvidence:
 @dataclass(frozen=True)
 class _RunOutcome:
     run_id: str
+    context_pack_id: str | None
+    workspace_goal_id: str | None
     model: str
     model_profile: str
     objective: str | None
@@ -108,6 +110,8 @@ class _RunOutcome:
     def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
+            "context_pack_id": self.context_pack_id,
+            "workspace_goal_id": self.workspace_goal_id,
             "model": self.model,
             "model_profile": self.model_profile,
             "objective": self.objective,
@@ -265,6 +269,12 @@ def _evaluate_run(
     outcome_payload = _payload(latest_outcome) if latest_outcome is not None else {}
     return _RunOutcome(
         run_id=str(run.id),
+        context_pack_id=str(pack.id) if pack is not None else None,
+        workspace_goal_id=(
+            str(pack.workspace_goal_id)
+            if pack is not None and pack.workspace_goal_id is not None
+            else None
+        ),
         model=model,
         model_profile=model_profile,
         objective=_normalized_text(run.objective or (pack.objective if pack else None)),

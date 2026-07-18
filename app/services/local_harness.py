@@ -190,7 +190,10 @@ class LocalHarnessRunner:
             context_file.write_text(pack.markdown, encoding="utf-8")
             context_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
             context_path = str(context_file)
-            child_argv = tuple(context_path if arg == CONTEXT_FILE_PLACEHOLDER else arg for arg in argv)
+            child_argv = tuple(
+                arg.replace(CONTEXT_FILE_PLACEHOLDER, context_path)
+                for arg in argv
+            )
             child_env = _child_environment(
                 extra_env,
                 context_path=context_path,
@@ -219,7 +222,7 @@ class LocalHarnessRunner:
             if verify and child_result.exit_code == 0:
                 for index, item in enumerate(verification_commands, start=1):
                     verification_argv = tuple(
-                        context_path if arg == CONTEXT_FILE_PLACEHOLDER else arg
+                        arg.replace(CONTEXT_FILE_PLACEHOLDER, context_path)
                         for arg in item.argv
                     )
                     result = await _run_command(

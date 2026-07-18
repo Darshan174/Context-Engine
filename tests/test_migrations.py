@@ -118,6 +118,9 @@ class TestRelationshipConfidenceEvidenceMigration:
             assert "confidence" in columns
             assert "evidence" in columns
             assert "status" in columns
+            goal_result = await conn.execute(text("PRAGMA table_info(workspace_goals)"))
+            goal_columns = {row[1] for row in goal_result.fetchall()}
+            assert "contract_json" in goal_columns
 
         async with engine.connect() as conn:
             result = await conn.execute(

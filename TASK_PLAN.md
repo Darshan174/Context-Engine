@@ -1,5 +1,176 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-18 launchable work-session loop — complete
+
+### Product failure
+
+The UI currently asks the user to set a `WorkspaceGoal` label, then asks for a
+second `Task` string in Prepare, then asks them to invent a worker command in
+Runs. The database can associate these records, but the user has to understand
+and operate the plumbing. That is not a launchable product loop.
+
+### Product contract
+
+1. The primary action is `Start AI work`, not `Choose goal`.
+2. One structured work contract contains the objective, definition of done,
+   selected source item, agent adapter, target model, and context budget.
+3. Starting work persists that contract and prepares its exact context pack in
+   one product action. The structured contract must be rendered into the pack
+   the agent receives; it cannot remain display-only metadata.
+4. First-class agent adapters are detected and versioned. A user chooses an
+   adapter instead of writing a raw command; custom commands remain advanced.
+5. Prepare is an evidence-review and pack-history surface. It must not ask for
+   a second unexplained task when a current work contract exists.
+6. Runs exposes one safe launch command for the selected adapter, the exact
+   pack it consumes, and the factual recorded result.
+7. Model identity and capability claims must state whether they were detected,
+   configured, inferred, or unverified.
+
+### Release gates
+
+- A new user can move from an issue or typed outcome to a prepared, executable
+  session without understanding goal IDs, compiler objectives, or argv syntax.
+- Definition-of-done criteria are present in the persisted pack and agent brief.
+- The stock-radar empty state explains exactly what happens on the next click.
+- Codex is a tested first-class adapter using current documented CLI behavior;
+  unsupported or unavailable adapters remain explicit.
+- Focused/full tests, production build, Ruff, diff checks, and desktop/mobile
+  browser QA pass.
+
+### Ownership
+
+- Architecture, implementation, and final verification: Codex
+  (`.agent-runs/2026-07-18-codex-launchable-work-session-task.md`).
+
+### Implemented outcome
+
+- Now no longer asks the user to choose a label. `Start AI work` captures an
+  objective, explicit completion checks, detected local agent, optional model,
+  and context budget as one `work_session.v1` contract.
+- Starting work persists the contract and its exact `context_pack.v2` in one
+  backend transaction. Definition-of-done criteria and the configured agent are
+  rendered into the pack rather than stored as inert UI metadata.
+- Prepare is now a read-only evidence and artifact surface. The duplicate Task,
+  target-model, and budget inputs are gone; active work can rebuild its exact
+  pack and saved packs remain reopenable, downloadable, and comparable.
+- Runs uses detected, versioned Codex, Claude Code, and OpenCode adapters to
+  generate direct-argv harness commands for the exact saved pack. Codex is
+  ready; Claude Code and OpenCode are explicitly experimental.
+- Recorded results remain attached to the same work contract and expose changed
+  files, deterministic checks, blockers, tool, requested model, and the honest
+  identity source before the user can accept completion.
+- Adapter version probes are time-bounded and kill stalled child processes.
+
+### Verification evidence
+
+- Backend: `python3 -m pytest -q` — 575 passed.
+- Frontend: `npm test -- --run` — 100 passed across 17 files.
+- Production frontend: `npm run build` — passed.
+- Static checks: `python3 -m ruff check app tests` and `git diff --check` —
+  passed.
+- Live desktop/mobile QA covered Now, Prepare, and Runs. At 390 × 844 the
+  document width remained 390 px; all primary destinations were visible and no
+  application console errors were observed.
+
+### Remaining honest gaps
+
+- The browser generates and copies the local launch command; it does not start
+  the coding agent process itself yet.
+- The selected model is user-configured or a provider default. Context Engine
+  does not yet receive provider-attested runtime model identity or probe true
+  model capabilities.
+- Claude Code and OpenCode launch contracts are experimental and require real
+  provider-session hardening before they should be called production-ready.
+- The product can collect paired-run evidence, but the claim that an older model
+  with Context Engine matches a newer model is not proven until controlled task
+  triplets are run from the same starting commit.
+
+## 2026-07-18 solid product-loop closeout — complete
+
+### Product outcome
+
+Make the existing goal, compiler, harness, and observation records operate as
+one understandable loop in the product: choose work, prepare evidence, launch
+an explicit local run, observe factual output, inspect the evidence, and decide
+the next action.
+
+### Observed
+
+- Now counts only its three rendered attention cards as “visible” and truncates
+  backlog to four without a complete destination.
+- Attention rows do not link to the graph card, source document, or provenance
+  they summarize.
+- Latest observed result hides the recorded model, tool, changed files,
+  verification counts, commit, and run identity already returned by the API.
+- Runs explains a raw CLI command but does not guide the user from the current
+  goal and prepared artifact to an observable harness run.
+- Saved packs can be reopened but cannot be compared, so users cannot see how
+  context selection changed between attempts.
+
+### Contract
+
+1. Keep Now concise, but link exact counts to complete searchable work lists.
+2. Every attention/backlog item must expose evidence and may become current only
+   through an explicit user action.
+3. A guided run must reuse the workspace, current goal, repository, and prepared
+   pack state; it may generate an explicit local command but never execute an
+   arbitrary shell command from the web server.
+4. Latest observed result must show only recorded harness facts and link to the
+   exact run.
+5. Pack comparison must report exact selected-item changes from persisted
+   manifests, not semantic guesses.
+
+### Release gates
+
+- Full attention/backlog lists are reachable and inspectable on desktop/mobile.
+- Explain can open the exact selected digest card from a deep link.
+- Runs presents a guided, copyable command and refreshes observed outcomes.
+- Now and Runs expose exact recorded model/file/check/status evidence.
+- Two saved packs can be compared for retained, added, and removed context.
+- Focused/full tests, build, Ruff, diff checks, and live browser QA pass.
+
+### Ownership
+
+- Implementation and verification: Codex
+  (`.agent-runs/2026-07-18-codex-solid-product-loop-task.md`).
+
+### Implemented outcome
+
+- Now remains a summary, while exact attention/backlog counts open a complete,
+  searchable work queue whose cards link to their graph evidence and source.
+- Explain accepts a stable card deep link and distinguishes a latest prepared
+  pack objective from a genuinely current goal.
+- Prepare gives every saved pack a stable URL and compares two persisted packs
+  by exact retained, added, removed, and changed item identities.
+- Runs guides the user through current goal, goal-attached pack, local worker
+  command, and recorded result. The generated CLI reuses the exact saved pack;
+  the browser never executes the worker command.
+- Now and Runs expose recorded model/tool, files, checks, status, run, commit,
+  and pack evidence. A goal can be completed only through an explicit user
+  action backed by a verified harness result attached to that exact goal.
+- Closed or merged provider work is no longer eligible for selection,
+  compilation, or the actionable backlog.
+
+### Verification evidence
+
+- Backend: `python3 -m pytest` — 570 passed.
+- Frontend: `npm test -- --run` — 100 passed.
+- Production frontend: `npm run build` — passed.
+- Static checks: `python3 -m ruff check .` and `git diff --check` — passed.
+- Live desktop/mobile QA covered Now, complete work, exact Explain deep links,
+  pack history/comparison/deep links, guided Runs, the mobile More menu, and
+  390 px horizontal overflow. No browser console errors were observed.
+
+### Remaining gaps
+
+- Provider adapters do not yet auto-launch or independently identify a model;
+  the user reviews and runs an explicit local command and supplies its label.
+- Model-lift claims still require controlled paired runs from the same task and
+  commit. The product reports observed groups but does not claim causality.
+- Pack comparison is deliberately exact-identity based, not semantic matching.
+- The large Connectors and graph modules still need separate decomposition;
+  this slice avoids expanding their monoliths but does not refactor them.
+
 ## 2026-07-17 product-loop and trust hardening — phase 1 complete
 
 ### Product outcome

@@ -17,11 +17,11 @@ import WorkspaceTopicGate from "../components/WorkspaceTopicGate";
 import {
   useContextDigest,
   useContextPack,
+  useContextPackComparison,
   useContextPacks,
   usePrepareContext,
 } from "../context-map/api";
 import { cleanDisplayText, formatTimeAgo } from "../context-map/digest";
-import { readWorkspacePreferences, writeWorkspacePreferences } from "../context/workspacePreferences";
 import { useProductWorkspace } from "./useProductWorkspace";
 
 export default function PreparePage() {
@@ -29,18 +29,13 @@ export default function PreparePage() {
   const digestQuery = useContextDigest(workspace.activeWorkspaceId);
   const prepareContext = usePrepareContext();
   const packsQuery = useContextPacks(workspace.activeWorkspaceId);
-  const [searchParams] = useSearchParams();
-  const initialPreferences = readWorkspacePreferences(
-    workspace.activeWorkspaceId,
-    "prepare",
-    { targetModel: "", tokenBudget: "4000" },
-  );
-  const [objective, setObjective] = useState(searchParams.get("objective") || "");
-  const [targetModel, setTargetModel] = useState(initialPreferences.targetModel);
-  const [tokenBudget, setTokenBudget] = useState(initialPreferences.tokenBudget);
-  const [selectedPackId, setSelectedPackId] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedPackId = searchParams.get("pack");
+  const [selectedPackId, setSelectedPackId] = useState(requestedPackId);
+  const [comparisonPackIds, setComparisonPackIds] = useState([]);
   const [copied, setCopied] = useState(false);
   const selectedPackQuery = useContextPack(workspace.activeWorkspaceId, selectedPackId);
+  const comparisonQuery = useContextPackComparison(workspace.activeWorkspaceId, comparisonPackIds);
 
   const result = selectedPackId ? selectedPackQuery.data : prepareContext.data;
   const rendering = result?.manifest?.rendering || {};
@@ -54,45 +49,37 @@ export default function PreparePage() {
   const excludedItems = result?.excluded_context || [];
   const exclusionSummary = useMemo(() => countBy(excludedItems, "reason"), [excludedItems]);
   const currentGoal = digestQuery.data?.current_goal || null;
-  const objectiveMatchesGoal = normalized(objective) === normalized(currentGoal?.title);
+  const workContract = currentGoal?.work_contract || {};
+  const contractAgent = workContract.agent || {};
+  const contractContext = workContract.context || {};
 
   useEffect(() => {
-    writeWorkspacePreferences(workspace.activeWorkspaceId, "prepare", {
-      targetModel,
-      tokenBudget,
-    });
-  }, [workspace.activeWorkspaceId, targetModel, tokenBudget]);
-
-  useEffect(() => {
-    if (objective || !digestQuery.data) return;
-    const focus = digestQuery.data.oversight?.current_focus?.title;
-    const task = (digestQuery.data.cards || []).find((card) => card.category === "task");
-    setObjective(cleanDisplayText(focus || task?.title || ""));
-  }, [digestQuery.data, objective]);
-
-  useEffect(() => {
-    setSelectedPackId(null);
+    setSelectedPackId(requestedPackId || null);
     setCopied(false);
+    setComparisonPackIds([]);
     prepareContext.reset?.();
-  }, [workspace.activeWorkspaceId]);
+  }, [requestedPackId, workspace.activeWorkspaceId]);
 
   if (!workspace.workspacesQuery.isLoading && !workspace.activeWorkspaceId) {
     return <WorkspaceTopicGate workspaces={workspace.workspaces} selectedId={workspace.selectedId} onSelect={workspace.setSelectedId} />;
   }
 
-  const submit = async (event) => {
-    event.preventDefault();
+  const rebuild = async () => {
+    if (!currentGoal) return;
     setCopied(false);
     setSelectedPackId(null);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("pack");
+    setSearchParams(nextParams, { replace: true });
     await prepareContext.mutateAsync({
-      objective: objective.trim(),
+      objective: currentGoal.title,
       objective_origin: "trusted_human",
       workspace_id: workspace.activeWorkspaceId,
-      workspace_goal_id: objectiveMatchesGoal ? currentGoal?.id : undefined,
-      focus_component_id: objectiveMatchesGoal ? currentGoal?.component_id || undefined : undefined,
+      workspace_goal_id: currentGoal.id,
+      focus_component_id: currentGoal.component_id || undefined,
       repo_path: digestQuery.data?.scope?.project_paths?.[0] || undefined,
-      target_model: targetModel.trim() || undefined,
-      token_budget: Number(tokenBudget),
+      target_model: contractAgent.target_model || undefined,
+      token_budget: Number(contractContext.token_budget || 4000),
       mode: "task",
     });
   };
@@ -112,50 +99,63 @@ export default function PreparePage() {
     URL.revokeObjectURL(url);
   };
 
+  const openSavedPack = (id) => {
+    prepareContext.reset?.();
+    setSelectedPackId(id);
+    setCopied(false);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("pack", id);
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const prepareNewPack = () => {
+    setSelectedPackId(null);
+    setCopied(false);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("pack");
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const toggleComparisonPack = (id) => {
+    setComparisonPackIds((current) => (
+      current.includes(id)
+        ? current.filter((value) => value !== id)
+        : [...current.slice(-1), id]
+    ));
+  };
+
   return (
     <div className="relative mx-auto w-full max-w-7xl space-y-6">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-[#85857c]">{workspace.activeWorkspace?.name || "Project"}</p>
-          <h1 className="mt-2 text-3xl font-black tracking-tight">Prepare</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#68685f] dark:text-[#aaa9a0]">Compile and recover source-backed agent briefs as durable project artifacts.</p>
+          <h1 className="mt-2 text-3xl font-black tracking-tight">Context pack</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#68685f] dark:text-[#aaa9a0]">Review what the agent will receive, why each item was included, and what was left out.</p>
         </div>
-        {selectedPackId ? <button type="button" onClick={() => { setSelectedPackId(null); setCopied(false); }} className="text-xs font-black underline underline-offset-4">Prepare a new pack</button> : null}
+        {selectedPackId ? <button type="button" onClick={prepareNewPack} className="text-xs font-black underline underline-offset-4">Back to active work</button> : null}
       </header>
 
       <div className="grid items-start gap-5 xl:grid-cols-[.72fr_1.28fr]">
         <div className="space-y-5">
-          <form onSubmit={submit} className="space-y-5 rounded-2xl border border-[#d8d8cf] bg-[#fbfbf6] p-6 dark:border-[#292925] dark:bg-[#141411]">
-            <label className="block">
-              <span className="text-xs font-black">Task</span>
-              <textarea aria-label="Task" required value={objective} onChange={(event) => setObjective(event.target.value)} rows={5} placeholder="Fix the authentication redirect loop and add focused tests" className="mt-2 w-full resize-none rounded-xl border border-[#d8d8cf] bg-white px-3.5 py-3 text-sm font-semibold leading-6 outline-none focus:border-[#77776e] dark:border-[#33332e] dark:bg-[#0f0f0c]" />
-            </label>
-            {currentGoal ? <p className={`rounded-lg px-3 py-2 text-[10px] font-bold ${objectiveMatchesGoal ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200" : "bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"}`}>{objectiveMatchesGoal ? "This pack will remain attached to the current goal." : "This task differs from the current goal, so the pack will remain an independent artifact."}</p> : null}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="text-xs font-black">Target model label <span className="font-semibold text-[#85857c]">(optional)</span></span>
-                <input aria-label="Target model" value={targetModel} onChange={(event) => setTargetModel(event.target.value)} placeholder="e.g. qwen2.5-coder-7b" className="mt-2 h-10 w-full rounded-lg border border-[#d8d8cf] bg-white px-3 text-xs font-semibold outline-none focus:border-[#77776e] dark:border-[#33332e] dark:bg-[#0f0f0c]" />
-                <span className="mt-1.5 block text-[10px] font-semibold leading-4 text-[#85857c]">Capabilities are inferred conservatively; provider probing is not connected yet.</span>
-              </label>
-              <label className="block">
-                <span className="text-xs font-black">Context budget</span>
-                <input aria-label="Context budget" type="number" min="300" step="100" required value={tokenBudget} onChange={(event) => setTokenBudget(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-[#d8d8cf] bg-white px-3 text-xs font-semibold outline-none focus:border-[#77776e] dark:border-[#33332e] dark:bg-[#0f0f0c]" />
-              </label>
-            </div>
-            {prepareContext.isError ? <p role="alert" className="text-xs font-bold leading-5 text-red-600">{prepareContext.error?.message || "The context pack could not be prepared."}</p> : null}
-            <button type="submit" disabled={prepareContext.isPending || !objective.trim()} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#171713] px-4 text-xs font-black text-white disabled:opacity-50 dark:bg-[#d9ff68] dark:text-[#171713]">
-              {prepareContext.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
-              {prepareContext.isPending ? "Compiling evidence…" : "Compile context"}
-            </button>
-          </form>
+          <section className="space-y-5 rounded-2xl border border-[#d8d8cf] bg-[#fbfbf6] p-6 dark:border-[#292925] dark:bg-[#141411]" aria-label="Active work contract">
+            {currentGoal ? <>
+              <div><p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#85857c]">Prepared for active work</p><h2 className="mt-2 text-lg font-black leading-7">{cleanDisplayText(currentGoal.title)}</h2></div>
+              <div><p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#85857c]">Done when</p>{workContract.definition_of_done?.length ? <ul className="mt-2 space-y-2 text-xs font-semibold leading-5">{workContract.definition_of_done.map((item) => <li key={item} className="flex gap-2"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />{item}</li>)}</ul> : <p className="mt-2 text-xs font-semibold text-amber-700 dark:text-amber-300">No completion criteria were saved. Replace this legacy goal before running it.</p>}</div>
+              <dl className="grid grid-cols-2 gap-2"><ContractFact label="Agent" value={contractAgent.adapter_id || "Not configured"} /><ContractFact label="Model" value={contractAgent.target_model || "Provider default · unverified"} /><ContractFact label="Context budget" value={`${contractContext.token_budget || 4000} tokens`} /><ContractFact label="Capability profile" value="Inferred · not provider-probed" /></dl>
+              {prepareContext.isError ? <p role="alert" className="text-xs font-bold leading-5 text-red-600">{prepareContext.error?.message || "The context pack could not be rebuilt."}</p> : null}
+              <button type="button" onClick={rebuild} disabled={prepareContext.isPending} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#171713] px-4 text-xs font-black text-white disabled:opacity-50 dark:bg-[#d9ff68] dark:text-[#171713]">{prepareContext.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}{prepareContext.isPending ? "Rebuilding exact pack…" : "Rebuild context pack"}</button>
+              <Link to="/app" className="block text-center text-[10px] font-black text-[#85857c] underline underline-offset-4">Change objective, done criteria, agent, or model in Now</Link>
+            </> : <div className="py-4 text-center"><PackageCheck className="mx-auto h-8 w-8 text-[#aaa99f]" /><h2 className="mt-3 text-base font-black">No active work contract</h2><p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-[#68685f] dark:text-[#aaa9a0]">Start AI work first. Context Engine will compile the pack as part of that action—there is no second task box here.</p><Link to="/app" className="mt-5 inline-flex h-10 items-center rounded-lg bg-[#171713] px-4 text-xs font-black text-white dark:bg-[#d9ff68] dark:text-[#171713]">Start AI work</Link></div>}
+          </section>
 
-          <PackHistory packs={packsQuery.data?.items || []} loading={packsQuery.isLoading} selectedPackId={selectedPackId} onOpen={(id) => { prepareContext.reset?.(); setSelectedPackId(id); setCopied(false); }} />
+          <PackHistory packs={packsQuery.data?.items || []} loading={packsQuery.isLoading} selectedPackId={selectedPackId} comparisonPackIds={comparisonPackIds} onOpen={openSavedPack} onToggleComparison={toggleComparisonPack} />
+          <PackComparison data={comparisonQuery.data} loading={comparisonQuery.isLoading} error={comparisonQuery.isError ? comparisonQuery.error : null} selectedCount={comparisonPackIds.length} />
         </div>
 
         <section aria-label="Compiled context result" className="min-h-[520px] rounded-2xl border border-[#d8d8cf] bg-[#fbfbf6] p-6 dark:border-[#292925] dark:bg-[#141411]">
           {selectedPackQuery.isLoading ? <ResultState icon={Loader2} title="Reopening saved context pack…" spin /> : null}
           {selectedPackQuery.isError ? <ResultState icon={XCircle} title="Could not reopen context pack" detail={selectedPackQuery.error?.message} /> : null}
-          {!result && !selectedPackQuery.isLoading ? <ResultState icon={FileText} title="No context pack open" detail="Compile one task or reopen a saved pack. Every result remains available in this workspace." /> : null}
+          {!result && !selectedPackQuery.isLoading ? <ResultState icon={FileText} title="No context pack open" detail="Start work in Now, rebuild the active pack, or reopen an exact saved artifact from history." /> : null}
           {result ? (
             <div className="space-y-6">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -186,7 +186,7 @@ export default function PreparePage() {
                 <summary className="cursor-pointer p-3 text-xs font-black uppercase tracking-[0.12em]">Preview compiled brief</summary>
                 <pre className="max-h-96 overflow-auto whitespace-pre-wrap border-t border-[#e2e2da] bg-[#0f0f0c] p-4 text-xs leading-5 text-[#e8e8e0] dark:border-[#292925]">{result.markdown}</pre>
               </details>
-              <p className="text-[10px] font-semibold text-[#85857c]">This artifact is saved. Nothing is sent to an agent automatically.</p>
+              <div className="flex flex-col gap-2 border-t border-[#e2e2da] pt-4 dark:border-[#292925] sm:flex-row sm:items-center sm:justify-between"><p className="text-[10px] font-semibold text-[#85857c]">This exact artifact is saved and will be passed to the configured harness.</p><Link to={`/app/runs?pack=${encodeURIComponent(result.context_pack_id)}`} className="text-xs font-black underline underline-offset-4">Continue to agent</Link></div>
             </div>
           ) : null}
         </section>
@@ -195,20 +195,53 @@ export default function PreparePage() {
   );
 }
 
-function PackHistory({ packs, loading, selectedPackId, onOpen }) {
+function PackHistory({ packs, loading, selectedPackId, comparisonPackIds, onOpen, onToggleComparison }) {
   return (
     <section className="rounded-2xl border border-[#d8d8cf] bg-[#fbfbf6] p-5 dark:border-[#292925] dark:bg-[#141411]">
       <div className="flex items-center justify-between gap-3"><h2 className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em]"><History className="h-4 w-4" />Pack history</h2><span className="text-[10px] font-bold text-[#85857c]">{packs.length} saved</span></div>
       {loading ? <p className="mt-4 text-xs text-[#85857c]">Loading saved packs…</p> : null}
       {!loading && !packs.length ? <p className="mt-4 text-xs leading-5 text-[#68685f] dark:text-[#aaa9a0]">No packs have been compiled for this workspace yet.</p> : null}
       {packs.length ? <div className="mt-3 max-h-80 space-y-2 overflow-auto">{packs.map((pack) => (
-        <button key={pack.context_pack_id} type="button" onClick={() => onOpen(pack.context_pack_id)} className={`block w-full rounded-lg border p-3 text-left ${selectedPackId === pack.context_pack_id ? "border-[#171713] bg-[#efefe7] dark:border-[#d9ff68] dark:bg-[#252521]" : "border-[#e2e2da] hover:border-[#aaa99f] dark:border-[#292925]"}`}>
-          <span className="block truncate text-xs font-black">{cleanDisplayText(pack.objective)}</span>
-          <span className="mt-1 block text-[10px] font-semibold text-[#85857c]">{formatTimeAgo(pack.created_at)} · {pack.selected_count} selected · {pack.run_count} runs</span>
-        </button>
+        <div key={pack.context_pack_id} className={`flex items-stretch rounded-lg border ${selectedPackId === pack.context_pack_id ? "border-[#171713] bg-[#efefe7] dark:border-[#d9ff68] dark:bg-[#252521]" : "border-[#e2e2da] hover:border-[#aaa99f] dark:border-[#292925]"}`}>
+          <button type="button" onClick={() => onOpen(pack.context_pack_id)} className="min-w-0 flex-1 p-3 text-left">
+            <span className="block truncate text-xs font-black">{cleanDisplayText(pack.objective)}</span>
+            <span className="mt-1 block text-[10px] font-semibold text-[#85857c]">{formatTimeAgo(pack.created_at)} · {pack.selected_count} selected · {pack.run_count} runs</span>
+          </button>
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5 border-l border-[#e2e2da] px-3 text-[9px] font-black uppercase tracking-wide text-[#85857c] dark:border-[#292925]"><input aria-label={`Compare ${cleanDisplayText(pack.objective)} from ${formatTimeAgo(pack.created_at)}`} type="checkbox" checked={comparisonPackIds.includes(pack.context_pack_id)} onChange={() => onToggleComparison(pack.context_pack_id)} />Compare</label>
+        </div>
       ))}</div> : null}
     </section>
   );
+}
+
+function PackComparison({ data, loading, error, selectedCount }) {
+  if (selectedCount === 0) return null;
+  if (selectedCount === 1) return <section className="rounded-2xl border border-dashed border-[#d8d8cf] p-5 text-xs font-semibold text-[#68685f] dark:border-[#292925] dark:text-[#aaa9a0]">Choose one more saved pack to compare exact context selection.</section>;
+  if (loading) return <section className="rounded-2xl border border-[#d8d8cf] p-5 text-xs font-semibold dark:border-[#292925]">Comparing saved packs…</section>;
+  if (error) return <section role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-5 text-xs font-bold text-red-700 dark:border-red-900/60 dark:bg-red-950/25 dark:text-red-300">{error.message || "The saved packs could not be compared."}</section>;
+  if (!data) return null;
+  const context = data.selected_context || {};
+  const tokenDelta = Number(data.right?.estimated_tokens || 0) - Number(data.left?.estimated_tokens || 0);
+  const healthDelta = Math.round(Number(data.right?.health_score || 0) - Number(data.left?.health_score || 0));
+  return (
+    <section className="rounded-2xl border border-[#d8d8cf] bg-[#fbfbf6] p-5 dark:border-[#292925] dark:bg-[#141411]" aria-label="Context pack comparison">
+      <div className="flex items-center justify-between gap-3"><h2 className="text-xs font-black uppercase tracking-[0.14em]">Exact pack comparison</h2><span className="text-[9px] font-black uppercase text-[#85857c]">Older → newer</span></div>
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><ComparisonMetric label="Retained" value={context.retained?.length || 0} /><ComparisonMetric label="Added" value={context.added?.length || 0} /><ComparisonMetric label="Removed" value={context.removed?.length || 0} /><ComparisonMetric label="Health delta" value={`${healthDelta >= 0 ? "+" : ""}${healthDelta}`} /></div>
+      <p className="mt-3 text-[10px] font-semibold text-[#85857c]">Token delta {tokenDelta >= 0 ? "+" : ""}{tokenDelta}. This compares persisted item identities and fields; it does not guess semantic equivalence.</p>
+      <ComparisonItems title="Added context" items={context.added || []} tone="text-emerald-700 dark:text-emerald-300" />
+      <ComparisonItems title="Removed context" items={context.removed || []} tone="text-red-700 dark:text-red-300" />
+      {context.changed?.length ? <ComparisonItems title="Retained but changed" items={context.changed.map((item) => item.right)} tone="text-amber-700 dark:text-amber-300" /> : null}
+    </section>
+  );
+}
+
+function ComparisonMetric({ label, value }) {
+  return <div className="rounded-xl bg-[#efefe7] p-3 text-center dark:bg-[#252521]"><p className="text-lg font-black">{value}</p><p className="text-[9px] font-black uppercase tracking-wide text-[#85857c]">{label}</p></div>;
+}
+
+function ComparisonItems({ title, items, tone }) {
+  if (!items.length) return null;
+  return <details className="mt-3 rounded-lg border border-[#e2e2da] dark:border-[#292925]"><summary className={`cursor-pointer p-3 text-[10px] font-black uppercase tracking-wide ${tone}`}>{title} · {items.length}</summary><div className="space-y-2 border-t border-[#e2e2da] p-3 dark:border-[#292925]">{items.map((item, index) => <p key={item.id || item.component_id || index} className="text-xs font-semibold">{cleanDisplayText(item.title || item.name || item.summary || item.id || "Context item")}</p>)}</div></details>;
 }
 
 function EvidenceList({ title, items, selected = false, exclusionSummary = {} }) {
@@ -251,6 +284,10 @@ function ResultMetric({ value, label }) {
   return <div className="rounded-xl bg-[#efefe7] p-3 text-center dark:bg-[#252521]"><p className="text-lg font-black">{value}</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-[#85857c]">{label}</p></div>;
 }
 
+function ContractFact({ label, value }) {
+  return <div className="rounded-xl bg-[#efefe7] p-3 dark:bg-[#252521]"><dt className="text-[9px] font-black uppercase tracking-wide text-[#85857c]">{label}</dt><dd className="mt-1 break-words text-[10px] font-black">{value}</dd></div>;
+}
+
 function countBy(items, key) {
   return items.reduce((counts, item) => ({ ...counts, [item[key] || "not_selected"]: (counts[item[key] || "not_selected"] || 0) + 1 }), {});
 }
@@ -277,8 +314,4 @@ function healthSummary(health) {
 
 function humanReason(value) {
   return String(value || "not supplied").replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function normalized(value) {
-  return cleanDisplayText(value).replace(/\s+/g, " ").trim();
 }

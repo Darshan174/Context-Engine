@@ -129,6 +129,7 @@ class ContextPrepareRequest(BaseModel):
     mode: Literal["task", "project_snapshot"] = "task"
     focus_component_id: UUID | None = None
     workspace_goal_id: UUID | None = None
+    work_contract: dict[str, Any] | None = None
     objective_origin: Literal[
         "trusted_human", "source_component", "project_snapshot"
     ] | None = None
@@ -204,6 +205,32 @@ async def get_context_pack(
     if pack is None:
         raise HTTPException(status_code=404, detail="Context pack not found")
     return _context_pack_artifact(pack)
+
+
+@router.get("/context/pack-comparisons")
+async def compare_context_packs(
+    workspace_id: UUID,
+    left_id: UUID,
+    right_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    access_scope: AccessScope = Depends(get_access_scope),
+) -> dict[str, Any]:
+    if not access_scope.allows_workspace(workspace_id):
+        raise HTTPException(status_code=404, detail="Context pack not found")
+    if left_id == right_id:
+        raise HTTPException(status_code=422, detail="Choose two different context packs")
+    packs = list(await session.scalars(
+        select(ContextPack).where(
+            ContextPack.workspace_id == workspace_id,
+            ContextPack.id.in_([left_id, right_id]),
+        )
+    ))
+    by_id = {pack.id: pack for pack in packs}
+    left = by_id.get(left_id)
+    right = by_id.get(right_id)
+    if left is None or right is None:
+        raise HTTPException(status_code=404, detail="Context pack not found")
+    return _compare_context_pack_artifacts(left, right)
 
 
 class OpenLoopActionRequest(BaseModel):
@@ -482,6 +509,7 @@ async def prepare_context(
             focus_component_id=payload.focus_component_id,
             workspace_goal_id=payload.workspace_goal_id,
             objective_origin=payload.objective_origin,
+            work_contract=payload.work_contract,
             access_scope=access_scope,
         )
         await session.commit()
@@ -593,3 +621,73 @@ def _context_pack_artifact(pack: ContextPack) -> dict[str, Any]:
         "excluded_context": excluded if isinstance(excluded, list) else [],
         "focus": manifest.get("focus") or {},
     }
+
+
+def _compare_context_pack_artifacts(left: ContextPack, right: ContextPack) -> dict[str, Any]:
+    if (left.created_at, str(left.id)) > (right.created_at, str(right.id)):
+        left, right = right, left
+    left_manifest = _context_pack_manifest(left)
+    right_manifest = _context_pack_manifest(right)
+    left_items = _context_items_by_identity(left_manifest.get("selected_context"))
+    right_items = _context_items_by_identity(right_manifest.get("selected_context"))
+    retained_ids = sorted(left_items.keys() & right_items.keys())
+    removed_ids = sorted(left_items.keys() - right_items.keys())
+    added_ids = sorted(right_items.keys() - left_items.keys())
+    changed = [
+        {
+            "identity": identity,
+            "left": left_items[identity],
+            "right": right_items[identity],
+        }
+        for identity in retained_ids
+        if left_items[identity] != right_items[identity]
+    ]
+    return {
+        "schema_version": "context_pack_comparison.v1",
+        "workspace_id": str(left.workspace_id),
+        "left": _context_pack_comparison_summary(left, left_manifest),
+        "right": _context_pack_comparison_summary(right, right_manifest),
+        "selected_context": {
+            "retained": [left_items[identity] for identity in retained_ids],
+            "added": [right_items[identity] for identity in added_ids],
+            "removed": [left_items[identity] for identity in removed_ids],
+            "changed": changed,
+        },
+    }
+
+
+def _context_pack_comparison_summary(
+    pack: ContextPack,
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    rendering = manifest.get("rendering") or {}
+    return {
+        "context_pack_id": str(pack.id),
+        "objective": pack.objective,
+        "target_model": pack.target_model or "default",
+        "model_profile": pack.model_profile,
+        "health_score": float(pack.health_score or 0.0),
+        "estimated_tokens": rendering.get("estimated_tokens"),
+        "created_at": pack.created_at,
+    }
+
+
+def _context_items_by_identity(raw_items: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw_items, list):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        identity = next(
+            (
+                str(raw.get(key))
+                for key in ("id", "component_id", "claim_id", "source_document_id")
+                if raw.get(key)
+            ),
+            # Never treat unrelated no-ID items at the same list position as
+            # retained. Exact content is the only honest fallback identity.
+            f"content:{json.dumps(raw, sort_keys=True, separators=(',', ':'), default=str)}",
+        )
+        result.setdefault(identity, raw)
+    return result

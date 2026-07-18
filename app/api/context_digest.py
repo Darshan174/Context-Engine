@@ -38,6 +38,7 @@ from app.services.founder_oversight import (
     FounderOversightNotFoundError,
     FounderOversightService,
 )
+from app.services.harness_outcomes import HarnessOutcomeService
 from app.services.focus_policy import focus_eligibility
 from app.services.open_loops import OpenLoopService, open_loop_to_dict
 from app.services.playbooks import PlaybookService
@@ -615,6 +616,10 @@ async def _latest_workspace_goal_outcome(
         .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
         .limit(10)
     )).unique())
+    outcome_report = await HarnessOutcomeService(session).summarize(
+        workspace_id=workspace_id
+    )
+    evaluated_by_run = {item.run_id: item for item in outcome_report.runs}
     for run in runs:
         outcomes = [
             item for item in run.observations if item.event_type == "outcome"
@@ -651,6 +656,7 @@ async def _latest_workspace_goal_outcome(
             observed=len(verification),
         )
         document = outcome.source_document
+        evaluated = evaluated_by_run.get(str(run.id))
         return {
             "run_id": str(run.id),
             "summary": summary,
@@ -662,6 +668,9 @@ async def _latest_workspace_goal_outcome(
             "head_commit": run.head_commit,
             "changed_files": [str(item) for item in changed_files],
             "verification": {"passed": passed, "observed": len(verification)},
+            "verified_success": bool(evaluated and evaluated.verified_success),
+            "failed_verification": bool(evaluated and evaluated.failed_verification),
+            "unresolved_blocker": bool(evaluated and evaluated.unresolved_blocker),
         }
     return None
 
@@ -1212,6 +1221,7 @@ def _component_to_card(
     focus_eligible, focus_ineligible_reason = focus_eligibility(
         component.fact_type,
         component.status,
+        provider_state=source_snapshot.provider_state,
     )
 
     return ContextCard(
