@@ -1,6 +1,151 @@
 # Immediate Context Engine Strengthening Plan
 
-## 2026-07-17 explicit-goal and realistic-project milestone — in progress
+## 2026-07-17 workspace navigation and state isolation — implementation complete
+
+### Product outcome
+
+Treat a workspace as a durable, directly enterable project boundary. Opening a
+workspace lands on its own Now page; transient input from another workspace
+cannot appear or be submitted there; saved configuration remains attached to
+the workspace that owns it.
+
+### Observed
+
+- Workspace management cards expose rename/archive controls but no open/select
+  action.
+- Switching workspaces leaves the current route component mounted, so local
+  goal drafts, query results, and compiler mutation state can survive the
+  boundary change.
+- The database did not clone the old goal into stock-radar. The stock-radar goal
+  was written explicitly 46 seconds after workspace creation, consistent with
+  stale frontend input being submitted after the switch.
+- Repository scope, connectors, and explicit goals are already persisted with a
+  workspace ID on the backend.
+
+### Scope
+
+1. Make each active workspace card an accessible open target that selects the
+   workspace and navigates to `/app`.
+2. Make workspace changes enter the selected workspace's Now page and remount
+   workspace-scoped route state.
+3. Reset transient Now/query/compiler output on boundary changes; persist only
+   reusable compiler and retrieval settings under the owning workspace ID.
+4. Prove a new workspace has no current goal while an existing workspace keeps
+   its own goal and configuration.
+
+### Release gates
+
+- Clicking an active project or sample card selects it and opens Now.
+- Rename/archive/delete controls never accidentally open a workspace.
+- A newly created workspace shows no goal or prior query unless the user saves
+  one in that workspace.
+- Returning to an existing workspace restores its backend state and its own
+  compiler/retrieval settings, never another workspace's.
+- Focused/full backend and frontend tests, production build, Ruff, and diff
+  checks pass; the live card-to-Now path is verified.
+
+### Ownership
+
+- Implementation and verification: Codex
+  (`.agent-runs/2026-07-17-codex-workspace-state-isolation-task.md`).
+
+### Implemented outcome
+
+- Active workspace cards and switcher choices now select the workspace and land
+  on its Now page.
+- Workspace changes remount route content, so unsaved goals, questions,
+  histories, results, and compiled output cannot cross project boundaries.
+- Reusable Prepare and retrieval controls are stored under workspace-specific
+  browser keys; new workspaces start from defaults and returning workspaces
+  recover only their own settings.
+- A backend regression proves newly created workspaces have no current goal,
+  while an existing workspace keeps its own persisted goal.
+- Live verification proved an unsaved stock-radar goal draft disappeared across
+  a workspace round trip while the saved workspace goal remained. The accidental
+  stock-radar goal was then cleared through the product UI.
+- All 92 frontend tests, the frontend production build, all 565 backend tests,
+  Ruff, and diff checks pass.
+
+## 2026-07-17 repository ignore-aware indexing — implementation complete
+
+### Product outcome
+
+Index the source a user considers part of the project, not generated framework
+output that Git already marks as ignored. Keep the existing file and byte safety
+limits for genuine source candidates.
+
+### Scope
+
+1. Use Git's tracked and non-ignored untracked file set when the repository is a
+   valid Git worktree.
+2. Expand safe fallback exclusions for non-Git projects and incomplete test
+   repositories, including `.next` and common build/cache directories.
+3. Preserve per-file, aggregate-byte, symlink, and file-count limits.
+4. Reproduce the stock-radar `.next` failure in a focused regression test.
+
+### Release gates
+
+- Tracked project files outside known generated directories remain eligible even
+  if a later ignore rule matches them.
+- Untracked ignored files and generated directories never consume the 50 MB cap.
+- Untracked, non-ignored source remains indexable.
+- Non-Git project roots retain deterministic hard-coded safety exclusions.
+- Focused/full tests, Ruff, and `git diff --check` pass.
+
+### Ownership
+
+- Implementation and verification: Codex
+  (`.agent-runs/2026-07-17-codex-repository-ignore-indexing-task.md`).
+
+### Implemented outcome
+
+- Valid Git worktrees are enumerated from tracked files plus non-ignored
+  untracked files, so repository ignore rules define the candidate boundary.
+- Generated directories remain excluded in Git and filesystem-fallback modes as
+  defense in depth.
+- The stock-radar repository now produces 210 candidates totaling 2,429,172
+  bytes, with no `.next` files; the 50 MB cap remains unchanged.
+- Focused indexer tests, the full 564-test backend suite, Ruff, and diff checks
+  pass.
+## 2026-07-17 product README story — completed
+
+### Product outcome
+
+Explain Context Engine in the language of the person using it: coding agents
+lose project state between sessions, the user pays the context tax, and the
+product turns scattered evidence into a clean handoff for whatever agent or
+model works next.
+
+### Scope
+
+1. Lead with the user-visible change, not the storage architecture.
+2. Make the model-efficiency thesis prominent without claiming proven parity.
+3. Show the real product loop and current shipped surfaces in plain language.
+4. Preserve Setup, Deployment, Contributing, Documentation, and License content.
+
+### Release gates
+
+- Every capability claim maps to implemented UI, API, CLI, or tests.
+- Samples and unverified model-lift claims are not presented as proof.
+- Copy is concise, specific, and avoids generic AI-marketing language.
+- Existing setup and OSS-readiness sections remain unchanged.
+
+### Ownership
+
+- Copy, claim audit, and final verification: Codex
+  (`.agent-runs/2026-07-17-codex-readme-product-story-task.md`).
+
+### Implemented and verified
+
+- The README now leads with the session-to-session context problem and the
+  concrete change in daily agent usage.
+- The older/cheaper-model thesis is prominent, while the absence of real
+  external-project proof remains explicit.
+- The product loop maps each surface to its actual user job and keeps the graph
+  in an explanatory role.
+- Setup, Deployment, Contributing, Documentation, and License remain unchanged.
+- All local README links resolve and `git diff --check` passes.
+## 2026-07-17 explicit-goal and realistic-project milestone — implementation complete; external validation pending
 
 ### Product outcome
 
@@ -22,6 +167,30 @@ the product to validate against a real external repository rather than demos.
 6. Validate the complete loop on a real external project before treating demo
    behavior as product evidence.
 
+### Implemented outcome
+
+- Current goal is now either an actually active run or an explicit user
+  selection with provenance; historical context packs cannot silently choose it.
+- Needs attention contains blockers, conflicts, stale evidence, and genuine
+  reviews. Ordinary issues remain selectable backlog and suggestions remain
+  visibly non-binding.
+- Workspaces now have explicit project/demo/sandbox identity plus active/archive
+  lifecycle, rename, restore, guarded permanent deletion, impact counts, and a
+  dedicated management surface.
+- The native selector is replaced by a project picker that separates projects
+  from samples and always exposes Add project and Manage actions.
+- First-use setup is repository-first: Context Engine creates a real-project
+  workspace only when local repository indexing succeeds, and rolls back a
+  failed creation instead of leaving an empty workspace.
+- Sessions with unknown repository relevance are called out on Now and remain
+  excluded from health, suggestions, and compiled project truth.
+
+### Remaining validation
+
+- Run the complete capture -> goal -> prepare -> harness -> outcome -> explain
+  loop on a user-supplied external project. The existing Context Engine and demo
+  workspaces are smoke-test evidence only, not external product validation.
+
 ### Release gates
 
 - Old context packs never silently become the current goal.
@@ -29,6 +198,8 @@ the product to validate against a real external repository rather than demos.
 - Open issues remain backlog unless selected or independently blocked/conflicted.
 - Goal mutations are workspace/access scoped and reject ineligible components.
 - Schema upgrades work through both Alembic and runtime migrations.
+- Archiving and deletion are blocked while an agent run is active; permanent
+  deletion additionally requires archive state and exact-name confirmation.
 - Focused and full backend/frontend tests, build, Ruff, and diff checks pass.
 
 ### Ownership
