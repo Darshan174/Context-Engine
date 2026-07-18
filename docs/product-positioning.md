@@ -1,58 +1,67 @@
 # Product Positioning
 
-## One-Line Position
+## One-line position
 
-Context Engine is the open-source project graph for AI-native builders. It turns
-agent runs, PRs, issues, chats, decisions, and documents into a visual map of
-what happened, what is connected, what is blocked, and what to do next.
+Context Engine is the open-source, self-hosted project-continuity layer for
+people building software with coding agents. It preserves source-backed project
+evidence, keeps the current goal explicit, prepares a focused handoff, and
+records observed run results for the next agent.
 
-## First Audience
+## First audience
 
-Solo founders and tiny teams using AI coding agents aggressively.
+Solo founders and tiny teams using coding agents every day.
 
 Their work is split across Codex, Claude Code, OpenCode, GitHub, chat, and local
-files. One agent proposes a change, another edits the code, a PR carries a
-partial implementation, and the next session starts without the decisions that
-led there.
+files. One agent proposes a change, another edits the code, a pull request carries
+part of the implementation, and the next session starts without the decisions
+that led there.
 
-## Daily-Use Test
+## Product loop
 
-The graph is useful only if a user can open it and quickly learn:
+1. **Sources and connectors** preserve repository state, coding sessions, issues,
+   pull requests, documents, decisions, and verification evidence.
+2. **Now** shows the active or latest coding work, its newest update and stated
+   reason, verified outcomes, and evidence-backed blockers or risks.
+3. **Prepare** compiles a bounded `context_pack.v2` brief with citations and
+   explicit exclusions for one concrete task.
+4. **The user runs the coding agent they choose.** The browser product does not
+   select a provider or dispatch an agent.
+5. **Runs** shows evidence captured by the optional local harness, which executes
+   only the worker command the user supplied.
+6. **Explain** visualizes the evidence and relationships behind the other
+   surfaces.
 
-- where the project stands;
-- which work is blocked;
-- what changed across AI sessions and code;
-- which decisions are missing from implementation or documentation;
-- which issues or assumptions are stale;
-- what the next agent should know and do.
+The daily-use test is whether a user can identify where the project stands, what
+is current, what is blocked or unverified, what changed, and what the next agent
+needs without reconstructing the project from chat history.
 
-A connector directory or generic search dashboard is not enough.
+## Role of the graph
 
-## Product Wedge
+The knowledge graph is an explanation and inspection surface. It supports Now,
+Prepare, and Runs by showing why evidence is connected. It is not the primary
+handoff artifact, a generic company knowledge graph, or the whole product.
 
-The wedge is:
+## Not the product
 
-**Visual project mapping for people building with AI coding agents.**
+Context Engine is not:
 
-AI coding-session memory and project progress tracking feed the graph. The graph
-is the primary navigation surface and the headline product experience.
+- another autonomous coding agent or provider router;
+- enterprise search or an all-in-one RAG platform;
+- a generic memory store or company knowledge graph;
+- an autonomous code reviewer;
+- a claim that a smaller model matches a frontier model.
 
-## Not The Product
-
-Context Engine is not positioned as:
-
-- enterprise search;
-- a generic company knowledge graph;
-- an all-in-one RAG platform;
-- a dashboard that merely lists connected tools.
-
-## Current Honest Boundary
+## Current honest boundary
 
 Context Engine can import Codex, Claude Code, and OpenCode session content and
 extract tasks, decisions, blockers, risks, and file references. A session ID is
-stored for identity and provenance, but the project cannot currently retrieve a
-remote session using only that ID.
+stored for identity and provenance, but the project cannot retrieve a remote
+session using only that ID.
 
-GitHub, Slack, Gmail, Google Drive, local files, and imported AI sessions can
-contribute source evidence. Unsupported or coming-soon connectors must remain
-clearly labelled.
+Already-imported local sessions refresh while Now is open. This reads only the
+linked local session; it does not discover unrelated sessions or launch an agent.
+
+Local repositories and files work as source evidence. GitHub, Slack, Gmail, and
+Google Drive have configured integration paths. Discord, Zoom, and Wispr Flow are
+coming soon; Notion is not catalogued. Availability must not be presented as a
+hosted, zero-configuration connection flow.
