@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Upload, FileText, FileCode, FileJson, X, ChevronRight, ChevronDown, CheckCircle, Clock, Layers, MessageSquare, HardDrive, Bot, Video, FolderOpen, Clipboard, AlertTriangle, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 
 function GitHubIcon({ className }) {
@@ -138,6 +139,7 @@ function groupIdForSource(source) {
 }
 
 export default function SourceManager() {
+  const [searchParams] = useSearchParams();
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -173,6 +175,16 @@ export default function SourceManager() {
   }, []);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
+
+  useEffect(() => {
+    const requestedSourceId = searchParams.get("source");
+    if (!requestedSourceId || selectedSource?.id === requestedSourceId) return;
+    const requestedSource = sources.find((source) => source.id === requestedSourceId);
+    if (requestedSource) {
+      setExpandedGroupId(groupIdForSource(requestedSource));
+      handleSourceClick(requestedSource);
+    }
+  }, [searchParams, selectedSource?.id, sources]);
 
   const groupedSources = useMemo(() => {
     const buckets = Object.fromEntries(SOURCE_GROUPS.map((g) => [g.id, []]));
@@ -216,9 +228,12 @@ export default function SourceManager() {
     setUploadError(null);
     try {
       for (const file of files) {
-        const content = await file.text();
         const ext = file.name.split(".").pop()?.toLowerCase() || "";
-        const sourceType = { md: "markdown", markdown: "markdown", txt: "text", text: "text", json: "json", csv: "csv", html: "html", htm: "html", pdf: "pdf" }[ext] || "text";
+        if (ext === "pdf" || file.type === "application/pdf") {
+          throw new Error(`PDF extraction is not available yet: ${file.name}. Import MD, TXT, JSON, CSV, or HTML instead.`);
+        }
+        const content = await file.text();
+        const sourceType = { md: "markdown", markdown: "markdown", txt: "text", text: "text", json: "json", csv: "csv", html: "html", htm: "html" }[ext] || "text";
         await api.post("/sources", {
           source_type: sourceType,
           external_id: file.name,
@@ -323,7 +338,7 @@ export default function SourceManager() {
             <Upload className="w-4 h-4" />
             {uploadOpen ? "Close import" : "Import files"}
           </button>
-          <input ref={fileInputRef} type="file" multiple accept=".md,.txt,.json,.csv,.html,.htm,.pdf" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+          <input ref={fileInputRef} type="file" multiple accept=".md,.markdown,.txt,.text,.json,.csv,.html,.htm" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
         </div>
 
         <div className="grid grid-cols-3 overflow-hidden rounded-md border border-[#d9d9d0] bg-[#fbfbf6] dark:border-[#292925] dark:bg-[#141411]">
@@ -364,7 +379,7 @@ export default function SourceManager() {
               <p className="text-sm font-medium text-slate-600 dark:text-neutral-400">
                 Drop files here or <span className="font-semibold text-brand-600 dark:text-brand-400">browse</span>
               </p>
-              <p className="text-xs text-slate-400 mt-1">MD · TXT · JSON · CSV · HTML · PDF</p>
+              <p className="text-xs text-slate-400 mt-1">MD · TXT · JSON · CSV · HTML</p>
             </>
           )}
         </div>}

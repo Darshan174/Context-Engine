@@ -616,7 +616,7 @@ async def _run_local_harness(
     from sqlalchemy import select
 
     from app.database import AsyncSessionLocal
-    from app.models import AgentRun, Workspace
+    from app.models import AgentRun, Workspace, WorkspaceGoal
     from app.services.context_compiler import ContextCompiler
     from app.services.local_harness import LocalHarnessRunner
     from app.time import utc_now
@@ -629,12 +629,30 @@ async def _run_local_harness(
     async with AsyncSessionLocal() as session:
         if await session.get(Workspace, workspace_id) is None:
             raise ValueError(f"Workspace not found: {workspace_id}")
+        selected_goal = await session.scalar(
+            select(WorkspaceGoal)
+            .where(
+                WorkspaceGoal.workspace_id == workspace_id,
+                WorkspaceGoal.status == "active",
+            )
+            .order_by(WorkspaceGoal.selected_at.desc(), WorkspaceGoal.id.desc())
+            .limit(1)
+        )
+        objective_matches_goal = bool(
+            selected_goal
+            and " ".join(selected_goal.title.split())
+            == " ".join(str(args.objective).split())
+        )
         pack_result = await ContextCompiler(session).compile_context_pack(
             args.objective,
             workspace_id=workspace_id,
             repo_path=args.repo,
             target_model=args.target_model,
             token_budget=args.budget,
+            workspace_goal_id=(selected_goal.id if objective_matches_goal else None),
+            focus_component_id=(
+                selected_goal.component_id if objective_matches_goal else None
+            ),
             persist=True,
         )
         if not pack_result.context_pack_id:

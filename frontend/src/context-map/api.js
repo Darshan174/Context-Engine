@@ -165,12 +165,38 @@ export function useIndexProject(workspaceId) {
 }
 
 export function usePrepareContext() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload) => {
       const result = await api.post("/context/prepare", payload);
       validateContextPackResponse(result);
       return result;
     },
+    onSuccess: (result) => {
+      const workspaceId = result?.workspace_id || result?.manifest?.workspace_id;
+      if (workspaceId) {
+        queryClient.invalidateQueries({ queryKey: ["context-packs", workspaceId] });
+        queryClient.invalidateQueries({ queryKey: ["context-digest", workspaceId] });
+      }
+    },
+  });
+}
+
+export function useContextPacks(workspaceId) {
+  return useQuery({
+    queryKey: ["context-packs", workspaceId],
+    queryFn: () => api.get(`/context/packs?workspace_id=${encodeURIComponent(workspaceId)}`),
+    enabled: Boolean(workspaceId),
+    retry: 1,
+  });
+}
+
+export function useContextPack(workspaceId, contextPackId) {
+  return useQuery({
+    queryKey: ["context-pack", workspaceId, contextPackId],
+    queryFn: () => api.get(`/context/packs/${encodeURIComponent(contextPackId)}?workspace_id=${encodeURIComponent(workspaceId)}`),
+    enabled: Boolean(workspaceId && contextPackId),
+    retry: 1,
   });
 }
 

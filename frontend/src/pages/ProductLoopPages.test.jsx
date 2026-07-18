@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
     setSelectedId: vi.fn(),
   },
   digest: { data: null, isLoading: false, isError: false },
-  prepare: { data: null, isPending: false, isError: false, mutateAsync: vi.fn() },
+  prepare: { data: null, isPending: false, isError: false, mutateAsync: vi.fn(), reset: vi.fn() },
+  packs: { data: { items: [] }, isLoading: false },
+  pack: { data: null, isLoading: false, isError: false },
   outcomes: { data: null, isLoading: false, isError: false },
   setGoal: { isPending: false, error: null, mutateAsync: vi.fn() },
   clearGoal: { isPending: false, error: null, mutateAsync: vi.fn() },
@@ -31,6 +33,8 @@ vi.mock("../context-map/api", () => ({
   useSetCurrentGoal: () => mocks.setGoal,
   useClearCurrentGoal: () => mocks.clearGoal,
   usePrepareContext: () => mocks.prepare,
+  useContextPacks: () => mocks.packs,
+  useContextPack: () => mocks.pack,
   useRunOutcomes: () => mocks.outcomes,
 }));
 
@@ -42,6 +46,12 @@ beforeEach(() => {
   mocks.prepare.isPending = false;
   mocks.prepare.isError = false;
   mocks.prepare.mutateAsync.mockReset().mockResolvedValue({});
+  mocks.prepare.reset.mockReset();
+  mocks.packs.data = { items: [] };
+  mocks.packs.isLoading = false;
+  mocks.pack.data = null;
+  mocks.pack.isLoading = false;
+  mocks.pack.isError = false;
   mocks.outcomes.data = null;
   mocks.outcomes.isLoading = false;
   mocks.outcomes.isError = false;
@@ -125,6 +135,7 @@ describe("product loop pages", () => {
       markdown: "# Agent brief\n\nUse source-backed evidence.",
       health_score: 92,
       manifest: {
+        objective: "Fix the redirect",
         target_model: { name: "older-coder", profile: "small_coder_model" },
         rendering: { estimated_tokens: 740 },
         token_accounting: { selected_item_tokens: 700 },
@@ -138,13 +149,13 @@ describe("product loop pages", () => {
     render(<MemoryRouter initialEntries={["/app/prepare?objective=Fix%20the%20redirect"]}><PreparePage /></MemoryRouter>);
 
     expect(screen.getByLabelText("Task")).toHaveValue("Fix the redirect");
-    expect(screen.getByText("older-coder")).toBeInTheDocument();
-    expect(screen.getByText("Concise small-model profile inferred from label · 740 estimated tokens")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Fix the redirect" })).toBeInTheDocument();
+    expect(screen.getByText("Concise small-model profile inferred for older-coder · 740 estimated tokens")).toBeInTheDocument();
     expect(screen.getByText("Authentication decision")).toBeInTheDocument();
-    expect(screen.getByText(/Why 1 items were left out/)).toBeInTheDocument();
+    expect(screen.getByText(/Excluded evidence · 1/)).toBeInTheDocument();
     expect(screen.getByText("Brief compiled")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy agent brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy brief" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("# Agent brief\n\nUse source-backed evidence."));
 
     fireEvent.click(screen.getByRole("button", { name: "Compile context" }));

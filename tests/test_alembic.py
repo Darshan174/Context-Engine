@@ -49,7 +49,10 @@ def test_alembic_upgrade_bootstraps_current_sqlite_schema(tmp_path):
 
         pack_columns = {column["name"] for column in inspector.get_columns("context_packs")}
         assert {
-            "focus_component_id", "objective_origin", "objective_source_document_id",
+            "focus_component_id",
+            "workspace_goal_id",
+            "objective_origin",
+            "objective_source_document_id",
             "objective_evidence_span_id",
         } <= pack_columns
         observation_columns = {
@@ -71,6 +74,6 @@ def test_alembic_upgrade_bootstraps_current_sqlite_schema(tmp_path):
         workspace_columns = {column["name"] for column in inspector.get_columns("workspaces")}
         assert {"kind", "status", "archived_at"} <= workspace_columns
 
-        assert version == "0007_workspace_lifecycle"
+        assert version == "0008_context_pack_goals"
     finally:
         engine.dispose()

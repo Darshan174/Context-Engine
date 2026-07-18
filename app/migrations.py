@@ -35,6 +35,7 @@ async def run_migrations(conn: AsyncConnection) -> None:
     await _migrate_postgres_text_search_schema(conn)
     await _migrate_founder_oversight_schema(conn)
     await _migrate_workspace_goals_schema(conn)
+    await _migrate_context_pack_goal_schema(conn)
     await _migrate_deterministic_project_compiler_schema(conn)
     await _migrate_truth_access_schema(conn)
     await _migrate_learning_loop_schema(conn)
@@ -107,6 +108,22 @@ async def _migrate_workspace_goals_schema(conn: AsyncConnection) -> None:
     await conn.execute(text(
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_goals_one_active "
         "ON workspace_goals (workspace_id) WHERE status = 'active'"
+    ))
+
+
+async def _migrate_context_pack_goal_schema(conn: AsyncConnection) -> None:
+    """Link persisted context artifacts to the explicit work that produced them."""
+    columns = await _get_table_columns(conn, "context_packs")
+    if not columns or "workspace_goal_id" in columns:
+        return
+    uuid_type = "UUID" if conn.dialect.name == "postgresql" else "CHAR(32)"
+    await conn.execute(text(
+        f"ALTER TABLE context_packs ADD COLUMN workspace_goal_id {uuid_type} "
+        "REFERENCES workspace_goals(id)"
+    ))
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_context_packs_workspace_goal "
+        "ON context_packs (workspace_goal_id)"
     ))
 
 

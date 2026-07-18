@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import SourceManager from "./SourceManager";
@@ -12,6 +13,8 @@ vi.mock("../api/client", () => ({
 }));
 
 describe("SourceManager", () => {
+  const renderManager = () => render(<MemoryRouter><SourceManager /></MemoryRouter>);
+
   beforeEach(() => {
     api.get.mockReset();
     api.post.mockReset();
@@ -52,7 +55,7 @@ describe("SourceManager", () => {
       throw new Error(`Unexpected API path: ${path}`);
     });
 
-    render(<SourceManager />);
+    renderManager();
 
     expect(await screen.findByText("Slack")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
@@ -100,7 +103,7 @@ describe("SourceManager", () => {
       throw new Error(`Unexpected API path: ${path}`);
     });
 
-    render(<SourceManager />);
+    renderManager();
 
     const documentsButton = (await screen.findByText("Documents")).closest("button");
     const unsupportedButton = screen.getByText("Unsupported").closest("button");
@@ -121,7 +124,7 @@ describe("SourceManager", () => {
     });
     api.post.mockResolvedValue({});
 
-    render(<SourceManager />);
+    renderManager();
 
     expect(await screen.findByText("No sources yet")).toBeInTheDocument();
 

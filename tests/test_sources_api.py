@@ -10,6 +10,19 @@ from app.models import SourceDocument, Workspace
 
 
 @pytest.mark.asyncio
+async def test_pdf_upload_is_rejected_until_real_extraction_exists(client):
+    response = await client.post(
+        "/api/sources/upload",
+        files={"file": ("roadmap.pdf", b"%PDF-1.7 binary", "application/pdf")},
+    )
+
+    assert response.status_code == 415
+    assert response.json()["detail"] == (
+        "PDF extraction is not available yet. Upload plain-text evidence instead."
+    )
+
+
+@pytest.mark.asyncio
 async def test_bulk_source_create_sync_processes_documents_before_return(client, db_session):
     response = await client.post(
         "/api/sources/bulk?sync=true",

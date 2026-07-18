@@ -25,6 +25,8 @@ from app.services.workspace_scope import (
 
 router = APIRouter()
 
+_TEXT_UPLOAD_EXTENSIONS = {"md", "markdown", "txt", "text", "json", "csv", "html", "htm"}
+
 
 class SourceCreate(BaseModel):
     workspace_id: UUID | None = None
@@ -187,15 +189,37 @@ async def upload_source(
 ) -> SourceRead:
     if not access_scope.allows_workspace(workspace_id):
         raise HTTPException(status_code=404, detail="Workspace not found")
-    content = (await file.read()).decode("utf-8", errors="replace")
-    metadata = {"filename": file.filename}
+    filename = file.filename or "upload"
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    content_type = str(file.content_type or "").lower()
+    if content_type == "application/pdf" or extension == "pdf":
+        raise HTTPException(
+            status_code=415,
+            detail="PDF extraction is not available yet. Upload plain-text evidence instead.",
+        )
+    if extension not in _TEXT_UPLOAD_EXTENSIONS and not content_type.startswith("text/"):
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported binary upload. Use MD, TXT, JSON, CSV, or HTML.",
+        )
+    raw_content = await file.read()
+    try:
+        content = raw_content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=415,
+            detail="The uploaded file is not valid UTF-8 text.",
+        ) from exc
+    if not content.strip():
+        raise HTTPException(status_code=422, detail="The uploaded file is empty.")
+    metadata = {"filename": filename, "content_type": content_type or None}
     if workspace_id:
         metadata["workspace_id"] = str(workspace_id)
     result = await ingest_source_document_revision(
         session,
         workspace_id=workspace_id,
         source_type="local",
-        external_id=file.filename or "upload",
+        external_id=filename,
         content=content,
         metadata_json=metadata,
     )

@@ -293,11 +293,19 @@ async def test_api_prepare_commits_pack_manifest_markdown_and_items(client, db_s
     (tmp_path / "app.py").write_text("def handler():\n    return True\n")
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_app.py").write_text("def test_handler():\n    assert True\n")
+    workspace = Workspace(
+        id=uuid4(),
+        name="Durable pack workspace",
+        slug=f"durable-pack-{uuid4().hex}",
+    )
+    db_session.add(workspace)
+    await db_session.flush()
 
     resp = await client.post(
         "/api/context/prepare",
         json={
             "objective": "fix app.py and run tests",
+            "workspace_id": str(workspace.id),
             "repo_path": str(tmp_path),
             "target_model": "qwen2.5-coder-7b",
             "token_budget": 3500,
@@ -308,6 +316,20 @@ async def test_api_prepare_commits_pack_manifest_markdown_and_items(client, db_s
     data = resp.json()
     assert data["context_pack_id"]
     assert data["manifest"]["schema_version"] == "context_pack.v2"
+
+    history = await client.get(
+        "/api/context/packs", params={"workspace_id": str(workspace.id)}
+    )
+    assert history.status_code == 200
+    assert history.json()["items"][0]["context_pack_id"] == data["context_pack_id"]
+
+    reopened = await client.get(
+        f"/api/context/packs/{data['context_pack_id']}",
+        params={"workspace_id": str(workspace.id)},
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["markdown"] == data["markdown"]
+    assert reopened.json()["objective"] == "fix app.py and run tests"
 
     conn = await db_session.connection()
     fresh = AsyncSession(bind=conn, expire_on_commit=False)

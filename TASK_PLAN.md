@@ -1,5 +1,86 @@
 # Immediate Context Engine Strengthening Plan
 
+## 2026-07-17 product-loop and trust hardening — phase 1 complete
+
+### Product outcome
+
+Turn the current collection of Now, Prepare, Runs, Sources, and Connectors
+screens into one durable, inspectable workflow. A user must be able to select
+work, compile a source-backed artifact, recover that artifact later, inspect why
+evidence was selected or excluded, and see factual run evidence attached to the
+same work.
+
+### Observed
+
+- Prepare conditionally returns before a later `useMemo`, creating a React hook
+  order crash path.
+- Prepared packs are persisted on the backend but have no product history,
+  reopen, diff, or download surface.
+- Prepare truncates selected evidence and reduces excluded evidence to counts,
+  despite promising exact selection transparency.
+- Now hides attention and backlog items without a complete destination, and
+  attention entries cannot open their evidence.
+- The default goal-to-Prepare path drops component identity, so observed runs
+  cannot reliably close the selected goal.
+- PDF files are read as text in the browser rather than extracted; mobile
+  navigation hides overflow; browser zoom is disabled; connector-run links
+  route to a component that ignores the run path.
+
+### Ordered implementation
+
+1. Remove the hook-order crash and dishonest/broken accessibility, PDF, mobile,
+   and connector-run paths.
+2. Expose persisted context packs as workspace history with reopen, download,
+   and full inclusion/exclusion inspection.
+3. Preserve current-goal identity through context compilation and observed run
+   attribution, including manually described goals.
+4. Add complete, inspectable attention and backlog destinations without
+   overcrowding Now.
+5. Verify focused and full test suites, production build, mobile/desktop live
+   behavior, Ruff, and diff integrity.
+
+### Release gates
+
+- React hooks execute in one stable order across loading/no-workspace changes.
+- Unsupported binary uploads fail honestly; PDF is never decoded with
+  `File.text()`.
+- Mobile navigation exposes every destination without hidden horizontal scroll,
+  and browser zoom remains available.
+- Every prepared pack can be reopened after refresh and downloaded as a stable
+  Markdown artifact.
+- Every selected and excluded item is individually inspectable with available
+  provenance, reason, and source metadata.
+- Current work remains linked to its prepared pack and latest observed result.
+- Attention and backlog counts link to complete, inspectable lists.
+
+### Ownership
+
+- Implementation and verification: Codex
+  (`.agent-runs/2026-07-17-codex-product-loop-hardening-task.md`).
+
+### Implemented outcome
+
+- Prepare now keeps a stable hook order and exposes durable workspace pack
+  history, reopen, Markdown download, and every selected/excluded evidence item.
+- Context packs can retain the explicit workspace-goal ID, and local harness
+  outcomes can resolve back to the same goal instead of relying on title or
+  component inference alone.
+- PDF uploads fail honestly until extraction exists; browser zoom is enabled;
+  mobile navigation exposes a compact More menu; connector-run links now open
+  actual run history.
+- Focused coverage proves pack persistence/reopen, migration state, PDF
+  rejection, and updated product surfaces. Full backend tests, frontend tests,
+  production build, Ruff, and diff checks pass.
+
+### Not implemented yet
+
+- Now still needs a complete, inspectable attention/backlog destination instead
+  of truncating cards.
+- Runs still needs a guided in-product execution path; the current harness
+  remains primarily CLI-driven.
+- Live desktop/mobile browser verification and context-pack diffing remain for
+  the next hardening slice.
+
 ## 2026-07-17 workspace navigation and state isolation — implementation complete
 
 ### Product outcome

@@ -21,8 +21,10 @@ from app.models import (
     OpenLoop,
     SourceDocument,
     VerifiedPlaybook,
+    Workspace,
 )
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.services.context_compiler import (
     ContextBudgetExceededError,
     ContextCompiler,
@@ -126,6 +128,7 @@ class ContextPrepareRequest(BaseModel):
     token_budget: int | None = Field(default=None, ge=300)
     mode: Literal["task", "project_snapshot"] = "task"
     focus_component_id: UUID | None = None
+    workspace_goal_id: UUID | None = None
     objective_origin: Literal[
         "trusted_human", "source_component", "project_snapshot"
     ] | None = None
@@ -149,6 +152,58 @@ class ContextPrepareResponse(BaseModel):
     selected_context: list[dict[str, Any]]
     excluded_context: list[dict[str, Any]]
     focus: dict[str, Any]
+
+
+class ContextPackArtifact(ContextPrepareResponse):
+    workspace_id: UUID | None = None
+    workspace_goal_id: UUID | None = None
+    objective: str
+    created_at: datetime
+
+
+@router.get("/context/packs")
+async def list_context_packs(
+    workspace_id: UUID,
+    limit: int = 30,
+    session: AsyncSession = Depends(get_db_session),
+    access_scope: AccessScope = Depends(get_access_scope),
+) -> dict[str, Any]:
+    if not access_scope.allows_workspace(workspace_id):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if await session.get(Workspace, workspace_id) is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    bounded_limit = max(1, min(int(limit), 100))
+    packs = list(await session.scalars(
+        select(ContextPack)
+        .options(selectinload(ContextPack.agent_runs))
+        .where(ContextPack.workspace_id == workspace_id)
+        .order_by(ContextPack.created_at.desc(), ContextPack.id.desc())
+        .limit(bounded_limit)
+    ))
+    return {
+        "workspace_id": str(workspace_id),
+        "items": [_context_pack_summary(pack) for pack in packs],
+    }
+
+
+@router.get("/context/packs/{context_pack_id}", response_model=ContextPackArtifact)
+async def get_context_pack(
+    context_pack_id: UUID,
+    workspace_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    access_scope: AccessScope = Depends(get_access_scope),
+) -> dict[str, Any]:
+    if not access_scope.allows_workspace(workspace_id):
+        raise HTTPException(status_code=404, detail="Context pack not found")
+    pack = await session.scalar(
+        select(ContextPack).where(
+            ContextPack.id == context_pack_id,
+            ContextPack.workspace_id == workspace_id,
+        )
+    )
+    if pack is None:
+        raise HTTPException(status_code=404, detail="Context pack not found")
+    return _context_pack_artifact(pack)
 
 
 class OpenLoopActionRequest(BaseModel):
@@ -425,6 +480,7 @@ async def prepare_context(
             persist=True,
             objective_kind=("project_snapshot" if payload.mode == "project_snapshot" else "observed"),
             focus_component_id=payload.focus_component_id,
+            workspace_goal_id=payload.workspace_goal_id,
             objective_origin=payload.objective_origin,
             access_scope=access_scope,
         )
@@ -482,3 +538,58 @@ async def prepare_context(
         excluded_context=result.excluded_items,
         focus=dict(result.manifest.get("focus") or {}),
     )
+
+
+def _context_pack_manifest(pack: ContextPack) -> dict[str, Any]:
+    try:
+        value = json.loads(pack.manifest or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _context_pack_summary(pack: ContextPack) -> dict[str, Any]:
+    manifest = _context_pack_manifest(pack)
+    selected = manifest.get("selected_context") or []
+    excluded = manifest.get("excluded_context") or []
+    runs = list(pack.agent_runs or [])
+    latest_run = max(
+        runs,
+        key=lambda item: (item.started_at or item.ended_at or pack.created_at, str(item.id)),
+        default=None,
+    )
+    return {
+        "context_pack_id": str(pack.id),
+        "workspace_goal_id": str(pack.workspace_goal_id) if pack.workspace_goal_id else None,
+        "objective": pack.objective,
+        "target_model": pack.target_model or "default",
+        "model_profile": pack.model_profile,
+        "health_score": float(pack.health_score or 0.0),
+        "token_budget": pack.token_budget,
+        "estimated_tokens": (manifest.get("rendering") or {}).get("estimated_tokens"),
+        "selected_count": len(selected) if isinstance(selected, list) else 0,
+        "excluded_count": len(excluded) if isinstance(excluded, list) else 0,
+        "created_at": pack.created_at,
+        "run_count": len(runs),
+        "latest_run_status": latest_run.status if latest_run is not None else None,
+    }
+
+
+def _context_pack_artifact(pack: ContextPack) -> dict[str, Any]:
+    manifest = _context_pack_manifest(pack)
+    selected = manifest.get("selected_context") or []
+    excluded = manifest.get("excluded_context") or []
+    return {
+        "context_pack_id": str(pack.id),
+        "schema_version": "context_pack.v2",
+        "workspace_id": pack.workspace_id,
+        "workspace_goal_id": pack.workspace_goal_id,
+        "objective": pack.objective,
+        "created_at": pack.created_at,
+        "markdown": pack.markdown,
+        "manifest": manifest,
+        "health_score": float(pack.health_score or 0.0),
+        "selected_context": selected if isinstance(selected, list) else [],
+        "excluded_context": excluded if isinstance(excluded, list) else [],
+        "focus": manifest.get("focus") or {},
+    }

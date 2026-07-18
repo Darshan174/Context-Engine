@@ -788,6 +788,7 @@ class ContextPack(Base):
         Index("ix_context_packs_workspace_created", "workspace_id", "created_at"),
         Index("ix_context_packs_target_model", "target_model"),
         Index("ix_context_packs_focus_component", "focus_component_id"),
+        Index("ix_context_packs_workspace_goal", "workspace_goal_id"),
         Index("ix_context_packs_objective_origin", "objective_origin"),
         Index(
             "ix_context_packs_workspace_target_created",
@@ -805,6 +806,9 @@ class ContextPack(Base):
     objective: Mapped[str] = mapped_column(Text, nullable=False)
     focus_component_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("components.id"), nullable=True
+    )
+    workspace_goal_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workspace_goals.id"), nullable=True
     )
     objective_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     objective_source_document_id: Mapped[UUID | None] = mapped_column(
@@ -829,6 +833,9 @@ class ContextPack(Base):
     workspace: Mapped["Workspace | None"] = orm_relationship(back_populates="context_packs")
     items: Mapped[list["ContextPackItem"]] = orm_relationship(back_populates="context_pack")
     agent_runs: Mapped[list["AgentRun"]] = orm_relationship(back_populates="context_pack")
+    workspace_goal: Mapped["WorkspaceGoal | None"] = orm_relationship(
+        back_populates="context_packs"
+    )
 
 
 class WorkspaceGoal(Base):
@@ -873,6 +880,9 @@ class WorkspaceGoal(Base):
 
     workspace: Mapped["Workspace"] = orm_relationship(back_populates="goals")
     component: Mapped["Component | None"] = orm_relationship()
+    context_packs: Mapped[list["ContextPack"]] = orm_relationship(
+        back_populates="workspace_goal"
+    )
 
 
 class ContextPackItem(Base):

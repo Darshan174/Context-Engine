@@ -23,6 +23,7 @@ from app.models import (
     Relationship,
     SourceDocument,
     UnresolvedRelationship,
+    WorkspaceGoal,
 )
 from app.services.model_profiles import (
     ModelCapabilityProfile,
@@ -283,6 +284,7 @@ class ContextCompiler:
         compatibility_mode: bool = False,
         objective_kind: str = "observed",
         focus_component_id: str | UUID | None = None,
+        workspace_goal_id: str | UUID | None = None,
         objective_origin: str | None = None,
         objective_source_document_id: str | UUID | None = None,
         objective_evidence_span_id: str | UUID | None = None,
@@ -310,6 +312,25 @@ class ContextCompiler:
         if effective_budget < 300:
             raise InvalidGoalError("token_budget is too small for mandatory context-pack sections")
         workspace_uuid = _uuid_or_none(workspace_id)
+        workspace_goal_uuid = _uuid_or_none(workspace_goal_id)
+        if workspace_goal_uuid is not None:
+            if self.session is None or workspace_uuid is None:
+                raise FocusValidationError(
+                    "workspace_goal_scope_required",
+                    "workspace_goal_id requires a persisted workspace context.",
+                )
+            workspace_goal = await self.session.get(WorkspaceGoal, workspace_goal_uuid)
+            if workspace_goal is None or workspace_goal.workspace_id != workspace_uuid:
+                raise FocusValidationError(
+                    "workspace_goal_not_found",
+                    "The selected current goal was not found in this workspace.",
+                    status_code=404,
+                )
+            if " ".join(workspace_goal.title.split()) != goal_frame.objective:
+                raise FocusValidationError(
+                    "workspace_goal_objective_mismatch",
+                    "The compiled objective no longer matches the selected current goal.",
+                )
         if repo_path is not None and str(repo_path).strip():
             root = Path(repo_path).expanduser().resolve()
             if not root.exists() or not root.is_dir():
@@ -399,6 +420,7 @@ class ContextCompiler:
                 context_pack_id=pack_id,
                 created_at=created_at,
                 workspace_id=workspace_uuid,
+                workspace_goal_id=workspace_goal_uuid,
                 goal_frame=goal_frame,
                 target_model=target_model,
                 profile=profile,
@@ -459,6 +481,11 @@ class ContextCompiler:
             known_playbook=known_playbook,
         )
         manifest["input_fingerprint"] = manifest["lockfile"]["replay_key"]
+        persistence_key = manifest["lockfile"]["replay_key"]
+        if workspace_goal_uuid is not None:
+            persistence_key = _sha256_text(
+                f"{persistence_key}:workspace-goal:{workspace_goal_uuid}"
+            )
         selected_item_tokens = sum(item.token_cost for item in selected)
         manifest["token_accounting"] = {
             "budget": effective_budget,
@@ -489,6 +516,7 @@ class ContextCompiler:
                     persisted_pack = await self._persist_pack(
                         pack_id=UUID(str(pack_id)),
                         workspace_id=workspace_uuid,
+                        workspace_goal_id=workspace_goal_uuid,
                         objective=goal_frame.objective,
                         target_model=target_model,
                         token_budget=effective_budget,
@@ -497,7 +525,7 @@ class ContextCompiler:
                         markdown=markdown,
                         manifest=manifest,
                         repo_state=repo_state,
-                        idempotency_key=manifest["lockfile"]["replay_key"],
+                        idempotency_key=persistence_key,
                         selected=selected,
                         focus=focus,
                     )
@@ -1127,6 +1155,7 @@ class ContextCompiler:
         context_pack_id: str | None,
         created_at: str,
         workspace_id: UUID | None,
+        workspace_goal_id: UUID | None,
         goal_frame: GoalFrame,
         target_model: str | None,
         profile: ModelCapabilityProfile,
@@ -1157,6 +1186,7 @@ class ContextCompiler:
             "focus": focus,
             "created_at": created_at,
             "workspace_id": str(workspace_id) if workspace_id else None,
+            "workspace_goal_id": str(workspace_goal_id) if workspace_goal_id else None,
             "target_model": {
                 "name": target_model or "default",
                 "profile": profile.name,
@@ -1212,6 +1242,7 @@ class ContextCompiler:
         *,
         pack_id: UUID,
         workspace_id: UUID | None,
+        workspace_goal_id: UUID | None,
         objective: str,
         target_model: str | None,
         token_budget: int,
@@ -1236,6 +1267,7 @@ class ContextCompiler:
         pack = ContextPack(
             id=pack_id,
             workspace_id=workspace_id,
+            workspace_goal_id=workspace_goal_id,
             objective=objective,
             focus_component_id=_uuid_or_none(focus.get("component_id")),
             objective_origin=focus.get("objective_origin"),

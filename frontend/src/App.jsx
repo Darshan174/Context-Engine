@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Routes, Route, NavLink, Navigate, Link, useLocation } from "react-router-dom";
 import ThemeToggle from "./components/ThemeToggle";
 import CeIcon from "./components/CeIcon";
@@ -12,6 +12,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PlayCircle,
+  MoreHorizontal,
+  Settings2,
   Waypoints,
 } from "lucide-react";
 
@@ -23,6 +25,7 @@ const QueryView    = lazy(() => import("./pages/QueryView"));
 const SourceManager = lazy(() => import("./pages/SourceManager"));
 const Landing      = lazy(() => import("./pages/Landing"));
 const Connectors   = lazy(() => import("./pages/Connectors"));
+const ConnectorRunsPage = lazy(() => import("./pages/ConnectorRunsPage"));
 const Changes      = lazy(() => import("./pages/Changes"));
 const WorkspacesPage = lazy(() => import("./pages/WorkspacesPage"));
 
@@ -130,9 +133,7 @@ function AdminShell() {
               <ThemeToggle />
             </div>
           </div>
-          <nav aria-label="Application" className="flex gap-1 overflow-x-auto border-t border-[#e5e5dd] px-4 py-2 no-scrollbar dark:border-[#1d1d1a] sm:px-6">
-            {NAV_ITEMS.map((item) => <ShellNavLink key={item.to} compact {...item} />)}
-          </nav>
+          <MobileNavigation />
         </header>
 
         <main className={`relative min-h-0 flex-1 dark:text-[#f4f4ec] ${isProjectPage ? "overflow-hidden" : "overflow-y-auto px-5 py-7 sm:px-8 sm:py-9"}`}>
@@ -151,7 +152,7 @@ function AdminShell() {
             <Route path="sources"                         element={<SourceManager />} />
             <Route path="agents"                          element={<Navigate to="/app" replace />} />
             <Route path="connectors"                      element={<Connectors />} />
-            <Route path="connectors/:connectorType/runs"  element={<Connectors />} />
+            <Route path="connectors/:connectorType/runs"  element={<ConnectorRunsPage />} />
             <Route path="changes"                         element={<Changes />} />
             <Route path="workspaces"                      element={<WorkspacesPage />} />
             <Route path="*"                               element={<Navigate to="/app" replace />} />
@@ -160,6 +161,59 @@ function AdminShell() {
         </main>
       </div>
     </div>
+  );
+}
+
+function MobileNavigation() {
+  const location = useLocation();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const primaryItems = NAV_ITEMS.slice(0, 3);
+  const secondaryItems = NAV_ITEMS.slice(3);
+
+  useEffect(() => setMoreOpen(false), [location.pathname]);
+
+  return (
+    <nav aria-label="Application" className="relative grid grid-cols-4 border-t border-[#e5e5dd] px-2 py-1.5 dark:border-[#1d1d1a]">
+      {primaryItems.map((item) => <MobileNavLink key={item.to} {...item} />)}
+      <button
+        type="button"
+        aria-expanded={moreOpen}
+        aria-controls="mobile-more-navigation"
+        onClick={() => setMoreOpen((current) => !current)}
+        className="flex min-w-0 flex-col items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-bold text-[#68685f] hover:bg-[#e8e8e0] dark:text-[#a2a298] dark:hover:bg-[#1f1f1b]"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+        <span>More</span>
+      </button>
+      {moreOpen ? (
+        <div id="mobile-more-navigation" className="absolute right-2 top-[calc(100%+6px)] z-50 min-w-52 rounded-xl border border-[#d9d9d0] bg-[#fbfbf6] p-2 shadow-xl dark:border-[#35352f] dark:bg-[#141411]">
+          {secondaryItems.map((item) => <MobileMoreLink key={item.to} {...item} />)}
+          <MobileMoreLink to="/app/workspaces" label="Workspaces" icon={Settings2} />
+        </div>
+      ) : null}
+    </nav>
+  );
+}
+
+function MobileNavLink({ to, label, icon: Icon, end }) {
+  return (
+    <NavLink
+      to={to}
+      end={end || to === "/app"}
+      className={({ isActive }) => `flex min-w-0 flex-col items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-bold ${isActive ? "bg-[#171713] text-white dark:bg-[#d9ff68] dark:text-[#171713]" : "text-[#68685f] hover:bg-[#e8e8e0] dark:text-[#a2a298] dark:hover:bg-[#1f1f1b]"}`}
+    >
+      <Icon className="h-4 w-4" />
+      <span className="max-w-full truncate">{label}</span>
+    </NavLink>
+  );
+}
+
+function MobileMoreLink({ to, label, icon: Icon }) {
+  return (
+    <NavLink to={to} className={({ isActive }) => `flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-bold ${isActive ? "bg-[#171713] text-white dark:bg-[#d9ff68] dark:text-[#171713]" : "text-[#68685f] hover:bg-[#e8e8e0] dark:text-[#a2a298] dark:hover:bg-[#1f1f1b]"}`}>
+      <Icon className="h-4 w-4" />
+      {label}
+    </NavLink>
   );
 }
 

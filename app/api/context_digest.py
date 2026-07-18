@@ -23,6 +23,7 @@ from app.models import (
     ContextPack,
     EvidenceSpan,
     Relationship,
+    RunObservation,
     SourceDocument,
 )
 from app.services.workspace_scope import (
@@ -545,6 +546,17 @@ async def _digest_oversight(
     if not workspace_id or not current_goal:
         return empty
     workspace_uuid = UUID(workspace_id)
+    goal_value = current_goal.get("id")
+    try:
+        workspace_goal_id = UUID(str(goal_value))
+    except (TypeError, ValueError):
+        workspace_goal_id = None
+    if workspace_goal_id is not None:
+        empty["latest_outcome"] = await _latest_workspace_goal_outcome(
+            session,
+            workspace_id=workspace_uuid,
+            workspace_goal_id=workspace_goal_id,
+        )
     component_value = current_goal.get("component_id")
     if not component_value:
         return empty
@@ -577,9 +589,98 @@ async def _digest_oversight(
             "context_pack_id": context_pack_id,
         },
         "state": timeline.get("state"),
-        "latest_outcome": timeline.get("latest_outcome"),
+        "latest_outcome": empty["latest_outcome"] or timeline.get("latest_outcome"),
         "attention": timeline.get("attention") or empty["attention"],
     }
+
+
+async def _latest_workspace_goal_outcome(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    workspace_goal_id: UUID,
+) -> dict | None:
+    runs = list((await session.scalars(
+        select(AgentRun)
+        .join(ContextPack, AgentRun.context_pack_id == ContextPack.id)
+        .options(
+            selectinload(AgentRun.observations).selectinload(
+                RunObservation.source_document
+            )
+        )
+        .where(
+            AgentRun.workspace_id == workspace_id,
+            ContextPack.workspace_goal_id == workspace_goal_id,
+        )
+        .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
+        .limit(10)
+    )).unique())
+    for run in runs:
+        outcomes = [
+            item for item in run.observations if item.event_type == "outcome"
+        ]
+        if not outcomes:
+            continue
+        outcome = max(
+            outcomes,
+            key=lambda item: (item.observed_at or item.created_at, str(item.id)),
+        )
+        try:
+            payload = json.loads(outcome.payload_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            changed_files = json.loads(outcome.files_json or "[]")
+        except (TypeError, json.JSONDecodeError):
+            changed_files = []
+        if not isinstance(changed_files, list):
+            changed_files = []
+        verification = payload.get("verification_results")
+        verification = verification if isinstance(verification, list) else []
+        passed = sum(
+            isinstance(item, dict) and item.get("exit_code") == 0
+            for item in verification
+        )
+        status = str(payload.get("status") or run.status or "observed")
+        summary = _goal_outcome_summary(
+            status=status,
+            changed_files=changed_files,
+            passed=passed,
+            observed=len(verification),
+        )
+        document = outcome.source_document
+        return {
+            "run_id": str(run.id),
+            "summary": summary,
+            "status": status,
+            "observed_at": outcome.observed_at or outcome.created_at,
+            "source_document_id": str(document.id) if document is not None else None,
+            "model": run.model,
+            "tool": run.tool,
+            "head_commit": run.head_commit,
+            "changed_files": [str(item) for item in changed_files],
+            "verification": {"passed": passed, "observed": len(verification)},
+        }
+    return None
+
+
+def _goal_outcome_summary(
+    *,
+    status: str,
+    changed_files: list,
+    passed: int,
+    observed: int,
+) -> str:
+    status_label = status.replace("_", " ").strip().capitalize() or "Observed"
+    file_label = f"{len(changed_files)} file{'s' if len(changed_files) != 1 else ''} changed"
+    verification_label = (
+        f"{passed}/{observed} verification checks passed"
+        if observed
+        else "verification was not run"
+    )
+    return f"{status_label}: {file_label}; {verification_label}."
 
 
 def _relationship_ids_by_component(relationships: list[Relationship]) -> dict[UUID, list[str]]:
